@@ -131,38 +131,61 @@ the PDF path uses, so this measures the engine, not a hand-tuned variant of it.
 The judgments key onto nfcorpus's own documents, not onto your papers, so the
 benchmark builds a throwaway database per embedder under `data/bench/` and the
 real corpus is never opened.
-`bm25ref` is a textbook Okapi BM25 (`k1=1.2`, `b=0.75`, no stemming) implemented
-in the same script over the same chunk text and the same qrels — a baseline
-computed on this machine rather than transcribed from a leaderboard, where
-chunking and title handling differ enough to make transcribed numbers
-uncomparable. Metrics are doc-level: chunk hits fold onto the parent document.
 
-| system | embedder | nDCG@10 | MRR@10 | Recall@100 | HitRate@100 |
+Every baseline below is **computed on this machine over the same text and the
+same qrels**, because leaderboard numbers for nfcorpus are not transferable —
+they differ in chunking, title handling and stemming, and transcribing them
+compares someone's setup to yours rather than two methods to each other. The
+lexical baselines are document-level over the *whole* corpus text (title + body,
+no chunking), which is the unit BEIR scores nfcorpus with, so the engine's
+chunked lanes face each method at its strongest.
+
+### The field, ranked
+
+Engine rows use nomic-embed-text; the baselines need no embedder at all.
+
+| # | system | nDCG@10 | MRR@10 | Recall@100 | HitRate@100 |
 |---|---|---|---|---|---|
-| hybrid (vec+BM25, RRF) | nomic-embed-text | **0.3516** | **0.5698** | **0.2907** | 0.8421 |
-| hybrid | bge-m3 (1024-d) | 0.3414 | 0.5435 | 0.2749 | 0.8359 |
-| hybrid | embeddinggemma-300M | 0.3190 | 0.5089 | 0.2774 | **0.8452** |
-| vector lane alone | nomic-embed-text | 0.3465 | 0.5468 | 0.2806 | 0.8297 |
-| vector lane alone | bge-m3 | 0.3185 | 0.5233 | 0.2595 | 0.8173 |
-| vector lane alone | embeddinggemma-300M | 0.1957 | 0.3485 | 0.2534 | 0.8111 |
-| engine BM25 lane | none | 0.3154 | 0.5183 | 0.2288 | 0.7802 |
-| BM25 reference (Okapi) | none | 0.3069 | 0.5151 | 0.2369 | 0.7709 |
+| 1 | **hybrid — this engine** (vec + BM25, RRF) | **0.3516** | **0.5698** | **0.2907** | **0.8421** |
+| 2 | vector lane alone (nomic-embed-text) | 0.3465 | 0.5468 | 0.2806 | 0.8297 |
+| 3 | BM25 via SQLite FTS5, porter stemming, whole docs | 0.3189 | 0.5233 | 0.2475 | 0.7926 |
+| 4 | this engine's BM25 lane (chunked) | 0.3154 | 0.5183 | 0.2288 | 0.7802 |
+| 5 | Okapi BM25, `k1=1.2 b=0.75`, no stemming | 0.3069 | 0.5151 | 0.2369 | 0.7709 |
+| 6 | Okapi BM25, `k1=0.9 b=0.4` (BEIR's nfcorpus config) | 0.3051 | 0.5080 | 0.2376 | 0.7678 |
+| 7 | TF-IDF cosine (Salton & Buckley), whole docs | 0.2983 | 0.4935 | 0.2349 | 0.7709 |
+| 8 | Okapi BM25 on titles only | 0.2162 | 0.4085 | 0.1726 | 0.6935 |
+| 9 | random document order (the floor) | 0.0098 | 0.0246 | 0.0286 | 0.4334 |
 
-- **Hybrid beats the lexical baseline with all three public embedders** — 14.6%
-  nDCG@10 with nomic-embed-text, 11.2% with bge-m3, 3.9% with
-  embeddinggemma-300M, all over the 0.3069 reference BM25, and Recall@100 rises
-  22.7% for the best of them.
-- **Embedder choice moves the engine more than fusion does** — the same hybrid
-  code spans 3.3 nDCG@10 points across the three models, wider than any ranking
-  knob in this project. Pick the embedder first.
-- **But fusion's value depends on which embedder you picked.** Hybrid gains 0.5
-  nDCG@10 over nomic's dense lane alone, 2.3 over bge-m3's, and **12.3** over
-  embeddinggemma's. A strong vector lane makes the lexical lane nearly redundant;
-  a weak one is carried by it. That is the argument for keeping both lanes rather
-  than hunting for the better single model.
-- **The `bm25` rows are identical across indexes on purpose.** The lexical lane
-  never touches embeddings, so it is the harness's control: if `bm25` differs
-  between two runs, something else changed in the code, not the model.
+### The same engine, three public embedders
+
+| embedder | hybrid | vector lane alone | gain over best baseline (row 3) |
+|---|---|---|---|
+| nomic-embed-text (768-d) | **0.3516** | 0.3465 | +10.3% |
+| bge-m3 (1024-d) | 0.3414 | 0.3185 | +7.1% |
+| embeddinggemma-300M (768-d) | 0.3190 | 0.1957 | +0.03% |
+
+What the two tables say, including the part that is not flattering:
+
+- **The engine is the best system measured here**, by 10.3% nDCG@10 over the
+  strongest lexical baseline and 17.9% over TF-IDF. That is a real margin, and it
+  is not a tie: `random` at 0.0098 shows the metric is not inflating anyone.
+- **Almost all of that margin is the embedder, not the engine.** nomic's vector
+  lane alone (0.3465) is already 8.7% over the best baseline; RRF fusion adds
+  1.5% on top of it. Say this plainly to anyone selling a "state of the art
+  hybrid ranker": hybrid beats BM25 by roughly however much *your embedder*
+  beats BM25, and with a weak embedder it does not — embeddinggemma's hybrid
+  lands at 0.3190, indistinguishable from the lexical baseline at 0.3189, because
+  its dense lane (0.1957) had nothing to contribute.
+- **Fusion's value is inverse to embedder quality.** Hybrid over its own dense
+  lane: +1.5% with nomic, +7.2% with bge-m3, **+63%** with embeddinggemma. A weak
+  embedder is carried by the lexical lane; a strong one barely uses it. Keeping
+  both lanes is cheap insurance, not the win.
+- **Stemming is worth more than the published BM25 tuning.** SQLite's porter
+  FTS5 (0.3189) beats both hand-written Okapi variants, and BEIR's own nfcorpus
+  `k1=0.9, b=0.4` is *below* the defaults at `k1=1.2, b=0.75` (0.3051 vs 0.3069).
+- **Chunking costs the lexical lane ~1%** — 0.3154 chunked against 0.3189 whole-doc
+  for the same method — and buys the dense lane its granularity. That trade is
+  the honest cost of indexing passages instead of papers.
 - **Recall@100 near 0.29 is a property of the dataset, not a defect.** nfcorpus
   averages 38 judged-relevant documents per question (median 16, max 475), so a
   100-document cutoff cannot possibly cover them. HitRate@100 — did *any*
@@ -175,6 +198,12 @@ separators mean AND), so one absent term dropped the document from the
 candidate set entirely. The engine's BM25 lane sat **31% below** textbook BM25
 (0.2109 vs 0.3069) and dragged hybrid down with it. Joining the terms with `OR`
 lifted the lane to 0.3154 and hybrid from 0.2867 to 0.3190 on the same index.
+
+```bash
+.venv/bin/python scripts/bench_nfcorpus.py --tag nomic            # everything above
+.venv/bin/python scripts/bench_nfcorpus.py --tag nomic \
+    --systems hybrid bm25 vec bm25okapi tfidf random              # a subset
+```
 
 ### Known-item set — retrieval over your own corpus
 

@@ -24,7 +24,9 @@ Usage:
 import argparse
 import json
 import math
+import random
 import re
+import sqlite3
 import sys
 import time
 from collections import Counter
@@ -38,8 +40,12 @@ ap = argparse.ArgumentParser(description=__doc__,
 ap.add_argument("--data", default=str(config.DATA_DIR / "bench" / "nfcorpus"))
 ap.add_argument("--tag", default="gemma", help="name for this index (per embedder)")
 ap.add_argument("--reindex", action="store_true", help="rebuild even if the index exists")
-ap.add_argument("--lanes", nargs="+", default=["hybrid", "bm25", "vec", "bm25ref"],
-                choices=["hybrid", "bm25", "vec", "bm25ref"])
+ap.add_argument("--systems", nargs="+", dest="lanes",
+                default=["hybrid", "bm25", "vec", "bm25okapi", "bm25beir",
+                         "bm25title", "fts5porter", "tfidf", "random"],
+                choices=["hybrid", "bm25", "vec", "bm25okapi", "bm25beir",
+                         "bm25title", "fts5porter", "tfidf", "random"],
+                help="engine lanes and baselines to score")
 ap.add_argument("--limit", type=int, help="score only this many queries (debug)")
 ap.add_argument("--json", help="write results here")
 a = ap.parse_args()
@@ -138,42 +144,111 @@ def lane_ranker(lanes):
     return run
 
 
-# Reference BM25 (Robertson et al., k1=1.2 b=0.75) at document level — this is
-# what "BM25" means in the IR literature and on leaderboards, so the engine's own
-# lexical lane is compared against it rather than against a remembered number.
-# One deliberate difference: no stemming, because there is no stemmer in the
-# standard library and pulling one in would not be reproducible elsewhere.
+# Baselines. All of them are document-level over the *whole* nfcorpus text
+# (title + body, no chunking) — the unit BEIR/Anserini score nfcorpus with — so
+# the engine's chunked, deduped lanes are being compared against the strongest
+# form of each method, not a strawman built on smaller units.
 def tokenize(s):
     return re.findall(r"[a-z0-9]+", s.lower())
 
 
-dl, postings = [], {}
-for idx, d in enumerate(corpus):
-    tf = Counter(tokenize((d.get("title") or "") + " " + d["text"]))
-    dl.append(sum(tf.values()) or 1)
-    for t, f in tf.items():
-        postings.setdefault(t, []).append((idx, f))
-AVGDL = sum(dl) / len(dl)
+def build_index(field):
+    """Inverted postings + lengths for one text field of the corpus."""
+    dl, postings, doc_tf = [], {}, []
+    for d in corpus:
+        tf = Counter(tokenize(field(d)))
+        dl.append(sum(tf.values()) or 1)
+        doc_tf.append(tf)
+        for t, f in tf.items():
+            postings.setdefault(t, []).append((len(dl) - 1, f))
+    return postings, dl, doc_tf
+
+
+DOC_IDS = [d["_id"] for d in corpus]
+POSTINGS, DL, DOC_TF = build_index(
+    lambda d: (d.get("title") or "") + " " + d["text"])
+AVGDL = sum(DL) / len(DL)
 N_DOCS = len(corpus)
+TITLE_POST, TITLE_DL, _ = build_index(lambda d: d.get("title") or "")
+TITLE_AVGDL = sum(TITLE_DL) / len(TITLE_DL) or 1.0
+
+# Robertson/Sparck Jones weighting (Okapi BM25), and the TF-IDF cosine that
+# preceded it. Both are textbook, both here in ~15 lines, so the numbers are
+# computed on this machine rather than remembered off a leaderboard.
+def okapi(postings, dl, avgdl, k1=1.2, b=0.75, top=100):
+    def run(qid, text):
+        scores = {}
+        for t in set(tokenize(text)):
+            chain = postings.get(t)
+            if not chain:
+                continue
+            idf = math.log(1 + (N_DOCS - len(chain) + 0.5) / (len(chain) + 0.5))
+            for i, f in chain:
+                scores[i] = scores.get(i, 0) + \
+                    idf * f * (k1 + 1) / (f + k1 * (1 - b + b * dl[i] / avgdl))
+        return [DOC_IDS[i] for i, _ in sorted(scores.items(), key=lambda x: -x[1])[:top]]
+    return run
 
 
-def bm25_reference(qid, text, top=100):
-    k1, b = 1.2, 0.75
+IDF = {t: math.log(1 + N_DOCS / len(ch)) for t, ch in POSTINGS.items()}
+NORMS = [math.sqrt(sum((1 + math.log(f)) ** 2 * IDF[t] ** 2
+                       for t, f in tf.items())) or 1.0 for tf in DOC_TF]
+
+
+def tfidf(qid, text, top=100):
+    """TF-IDF cosine similarity (Salton & Buckley): log-log weighting, L2 norms."""
+    q = Counter(tokenize(text))
+    qn = math.sqrt(sum((1 + math.log(f)) ** 2 * IDF.get(t, 0) ** 2
+                       for t, f in q.items())) or 1.0
     scores = {}
-    for t in set(tokenize(text)):
-        chain = postings.get(t)
-        if not chain:
+    for t, qf in q.items():
+        if t not in IDF:
             continue
-        idf = math.log(1 + (N_DOCS - len(chain) + 0.5) / (len(chain) + 0.5))
-        for i, f in chain:
-            scores[i] = scores.get(i, 0) + \
-                idf * f * (k1 + 1) / (f + k1 * (1 - b + b * dl[i] / AVGDL))
-    return [corpus[i]["_id"] for i, _ in sorted(scores.items(), key=lambda x: -x[1])[:top]]
+        qw = (1 + math.log(qf)) * IDF[t]
+        for i, f in POSTINGS[t]:
+            scores[i] = scores.get(i, 0) + qw * (1 + math.log(f))
+    ranked = ((i, s / (NORMS[i] * qn)) for i, s in scores.items())
+    return [DOC_IDS[i] for i, _ in sorted(ranked, key=lambda x: -x[1])[:top]]
 
+
+# SQLite's own FTS5 ranking over the whole corpus, with porter stemming — a
+# third-party implementation of the same public method, so agreement with the
+# hand-written Okapi is a check on both.
+mem = sqlite3.connect(":memory:")
+mem.execute("CREATE VIRTUAL TABLE docs_fts USING fts5(text, tokenize='porter unicode61')")
+mem.executemany("INSERT INTO docs_fts(rowid, text) VALUES(?,?)",
+                [(i, (d.get("title") or "") + " " + d["text"])
+                 for i, d in enumerate(corpus)])
+
+
+def fts5_porter(qid, text, top=100):
+    terms = " OR ".join('"%s"' % t for t in retriever._keywords(text))
+    if not terms:
+        return []
+    return [DOC_IDS[r[0]] for r in mem.execute(
+        "SELECT rowid FROM docs_fts WHERE docs_fts MATCH ? ORDER BY bm25(docs_fts) LIMIT ?",
+        (terms, top))]
+
+
+def shuffled(qid, text, top=100):
+    """Seeded random order — the floor. A metric that scores this well is broken."""
+    pool = list(DOC_IDS)
+    random.Random(qid).shuffle(pool)
+    return pool[:top]
+
+
+BASELINES = {
+    "bm25okapi": okapi(POSTINGS, DL, AVGDL),                # k1=1.2, b=0.75
+    "bm25beir": okapi(POSTINGS, DL, AVGDL, k1=0.9, b=0.4),  # BEIR's nfcorpus config
+    "bm25title": okapi(TITLE_POST, TITLE_DL, TITLE_AVGDL),   # titles only
+    "tfidf": tfidf,
+    "fts5porter": fts5_porter,
+    "random": shuffled,
+}
 
 systems = {}
 for name in a.lanes:
-    systems[name] = bm25_reference if name == "bm25ref" else lane_ranker(LANES[name])
+    systems[name] = BASELINES[name] if name in BASELINES else lane_ranker(LANES[name])
 
 results = {}
 for name, ranker in systems.items():
