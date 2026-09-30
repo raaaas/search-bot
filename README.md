@@ -112,9 +112,75 @@ pool; without it the anonymous rate limit applies.
 
 ## Benchmarks
 
-Retrieval is measured against a labeled set rather than by feel. The set is
-generated locally from **your** corpus and is gitignored like the PDFs it comes
-from — it is a list of paper titles and PMIDs, which is corpus content, not code:
+Two sets, and only the first one is comparable to anyone else's numbers.
+
+### nfcorpus — public questions, human judgments
+
+BEIR's `nfcorpus`: 323 real biomedical questions from TREC 2017/2018 over 3,633
+PubMed documents, with 12,334 graded relevance judgments (this split uses
+grades 1 and 2) made by people who had never seen this codebase. Nothing about
+your corpus is involved, so the result is a claim an outsider can re-run.
+
+```bash
+.venv/bin/python scripts/fetch_nfcorpus.py              # -> data/bench/nfcorpus/*.jsonl (gitignored)
+.venv/bin/python scripts/bench_nfcorpus.py --tag gemma  # one index per embedder, reuse it by tag
+```
+
+Documents are chunked, embedded and stored through the same `indexer` functions
+the PDF path uses, so this measures the engine, not a hand-tuned variant of it.
+The judgments key onto nfcorpus's own documents, not onto your papers, so the
+benchmark builds a throwaway database per embedder under `data/bench/` and the
+real corpus is never opened.
+`bm25ref` is a textbook Okapi BM25 (`k1=1.2`, `b=0.75`, no stemming) implemented
+in the same script over the same chunk text and the same qrels — a baseline
+computed on this machine rather than transcribed from a leaderboard, where
+chunking and title handling differ enough to make transcribed numbers
+uncomparable. Metrics are doc-level: chunk hits fold onto the parent document.
+
+| system | embedder | nDCG@10 | MRR@10 | Recall@100 | HitRate@100 |
+|---|---|---|---|---|---|
+| hybrid (vec+BM25, RRF) | nomic-embed-text | **0.3516** | **0.5698** | **0.2907** | 0.8421 |
+| hybrid | bge-m3 (1024-d) | 0.3414 | 0.5435 | 0.2749 | 0.8359 |
+| hybrid | embeddinggemma-300M | 0.3190 | 0.5089 | 0.2774 | **0.8452** |
+| vector lane alone | nomic-embed-text | 0.3465 | 0.5468 | 0.2806 | 0.8297 |
+| vector lane alone | bge-m3 | 0.3185 | 0.5233 | 0.2595 | 0.8173 |
+| vector lane alone | embeddinggemma-300M | 0.1957 | 0.3485 | 0.2534 | 0.8111 |
+| engine BM25 lane | none | 0.3154 | 0.5183 | 0.2288 | 0.7802 |
+| BM25 reference (Okapi) | none | 0.3069 | 0.5151 | 0.2369 | 0.7709 |
+
+- **Hybrid beats the lexical baseline with all three public embedders** — 14.6%
+  nDCG@10 with nomic-embed-text, 11.2% with bge-m3, 3.9% with
+  embeddinggemma-300M, all over the 0.3069 reference BM25, and Recall@100 rises
+  22.7% for the best of them.
+- **Embedder choice moves the engine more than fusion does** — the same hybrid
+  code spans 3.3 nDCG@10 points across the three models, wider than any ranking
+  knob in this project. Pick the embedder first.
+- **But fusion's value depends on which embedder you picked.** Hybrid gains 0.5
+  nDCG@10 over nomic's dense lane alone, 2.3 over bge-m3's, and **12.3** over
+  embeddinggemma's. A strong vector lane makes the lexical lane nearly redundant;
+  a weak one is carried by it. That is the argument for keeping both lanes rather
+  than hunting for the better single model.
+- **The `bm25` rows are identical across indexes on purpose.** The lexical lane
+  never touches embeddings, so it is the harness's control: if `bm25` differs
+  between two runs, something else changed in the code, not the model.
+- **Recall@100 near 0.29 is a property of the dataset, not a defect.** nfcorpus
+  averages 38 judged-relevant documents per question (median 16, max 475), so a
+  100-document cutoff cannot possibly cover them. HitRate@100 — did *any*
+  relevant document reach the candidate pool — is 0.84, and that pool is what the
+  prompt's top 8 get selected from.
+
+This benchmark is also what found the lexical-lane bug described in
+`CHANGELOG.md`: every keyword was a mandatory quoted phrase (FTS5 space
+separators mean AND), so one absent term dropped the document from the
+candidate set entirely. The engine's BM25 lane sat **31% below** textbook BM25
+(0.2109 vs 0.3069) and dragged hybrid down with it. Joining the terms with `OR`
+lifted the lane to 0.3154 and hybrid from 0.2867 to 0.3190 on the same index.
+
+### Known-item set — retrieval over your own corpus
+
+The second set is generated locally from **your** corpus and is gitignored like
+the PDFs it comes from: it is a list of paper titles and PMIDs, which is corpus
+content, not code.
 
 ```bash
 .venv/bin/python scripts/build_eval_set.py --docs 120 --seed 7   # -> tests/eval/known_item.json
@@ -122,35 +188,38 @@ from — it is a list of paper titles and PMIDs, which is corpus content, not co
        --recency 0.05 --citations 0.05 --json /tmp/bench.json
 ```
 
-`build_eval_set.py` derives gold **by construction** from the indexed corpus, in
-three query families: a paper's own title (known-item search), a verbatim
-mid-document sentence, and a short typed keyword string. Public QA sets were the
-first choice and are unusable here: the BioASQ mirrors expose no resolvable PMIDs
-and PubMedQA needs a 233 MB download for a handful of matches — measured overlap
-with this corpus was **0 questions**. Corpus-derived gold is objective, but it
-means these numbers say nothing about paraphrase robustness, which is the axis
-real questions stress. That gap is open.
+`build_eval_set.py` derives gold **by construction** in three query families: a
+paper's own title (known-item search), a verbatim mid-document sentence, and a
+short typed keyword string. It answers a different question than nfcorpus —
+*can the engine find a document it is holding, when the query shares words with
+it* — and says nothing about paraphrase robustness, which is the axis real
+questions stress.
 
 Whole corpus (607 papers / 20,700 chunks), 354 queries, doc-level metric — a hit
 is *any* chunk of the right paper reaching the cutoff:
 
 | config | R@1 | R@5 | R@8 | R@20 | MRR | miss |
 |---|---|---|---|---|---|---|
-| hybrid (vec+BM25, RRF) | 0.644 | 0.918 | 0.932 | 0.952 | 0.773 | 17 |
-| BM25 only | 0.647 | 0.678 | 0.686 | 0.698 | 0.662 | 107 |
-| vector only | 0.537 | 0.675 | 0.726 | 0.805 | 0.603 | 69 |
-| hybrid + recency 0.05 | 0.701 | 0.910 | 0.929 | 0.952 | 0.792 | 17 |
-| hybrid + citations 0.05 | **0.732** | 0.927 | **0.935** | 0.955 | **0.813** | 16 |
+| hybrid (vec+BM25, RRF) | 0.732 | 0.912 | 0.949 | 0.975 | 0.811 | 9 |
+| BM25 only | 0.879 | 0.944 | 0.952 | 0.975 | 0.908 | 9 |
+| vector only | 0.545 | 0.675 | 0.729 | 0.805 | 0.607 | 69 |
+| hybrid + recency 0.05 | 0.743 | 0.895 | 0.944 | 0.975 | 0.813 | 9 |
+| hybrid + citations 0.05 | **0.757** | 0.907 | **0.949** | 0.975 | **0.825** | 9 |
 
 What the numbers say:
 
-- **Fusion buys recall depth, not rank 1.** BM25 ties hybrid at R@1 and then
-  falls off a cliff: 107 queries with no chunk of the right paper in the top 20,
-  against 17 for hybrid. The vector lane's job is to put the paper *in* the
-  candidate set; at top-8 (what the prompt uses) hybrid is worth 25 points.
-- **BM25 wins verbatim prose outright** — 0.871 R@1 on sentence queries against
-  hybrid's 0.534, because an exact sentence is a lexical lock and the vector
-  lane spends votes on near-neighbour chunks. Per-family tables are printed
+- **On this set BM25 alone now leads.** After the `OR` fix described above the
+  lexical lane's cliff disappears — R@20 0.698 → 0.975, misses 107 → 9 — and it
+  matches or beats hybrid at every cutoff except the title family, where hybrid
+  edges ahead (0.899 vs 0.891). That is expected rather than damning: gold here
+  is by construction, so every query shares words with its document by design and
+  the set cannot show what a dense lane is for. nfcorpus can, because humans
+  typed those questions without the document in front of them: there the vector
+  lane scores 0.3465 nDCG@10 against 0.3154 for the lexical lane, and fusion
+  lands on top of both at 0.3516.
+- **BM25 still wins verbatim prose outright** — 0.871 R@1 on sentence queries
+  against hybrid's 0.586, because an exact sentence is a lexical lock and the
+  vector lane spends votes on near-neighbour chunks. Per-family tables print
   alongside the overall one for exactly this reason.
 - **Both metadata signals help at 0.05.** Under the multiplicative form the cost
   of over-weighting grows smoothly — at `0.2` recency is still worth a point and
@@ -162,8 +231,17 @@ The corpus index and the query embedder must be the **same model**. Indexing
 with embedder A and querying with B does not error, it just returns noise: with
 the vector lane fed by a mismatched model, hybrid R@1 was **0.000** across all
 354 queries — worse than disabling it, because the garbage votes occupy the top
-RRF slots and push BM25's correct chunk down. If retrieval ever feels like it is
-"just BM25", run `--lanes vec` and look at the miss count.
+RRF slots and push BM25's correct chunk down. Two 768-dimension models are
+indistinguishable to SQLite, and a server that resolves model names loosely will
+answer a request for a model it is not running, cheerfully and with HTTP 200.
+`probe_embedder.py` turns that into one number: it re-embeds stored chunk text
+and reports the cosine against what is in the table — 0.9999 for the model that
+built the index, -0.003 for a same-dimension impostor.
+
+```bash
+.venv/bin/python scripts/probe_embedder.py                    # the live corpus
+.venv/bin/python scripts/probe_embedder.py --db data/bench/nfcorpus-nomic.db
+```
 
 ## Agentic trace UI
 
@@ -205,8 +283,10 @@ searchbot/            the engine (importable package)
   mcp_server.py       stdio MCP server (JSON-RPC 2.0)
   webserver.py        127.0.0.1:8181 JSON API + static UI
 web/index.html        chat UI with evidence panel
-scripts/              index.py, ask.py, citations.py, build_eval_set.py,
-                      bench_retrieval.py, start_servers.sh
+scripts/              index.py, ask.py, citations.py,
+                      build_eval_set.py + bench_retrieval.py (known-item set),
+                      fetch_nfcorpus.py + bench_nfcorpus.py (public benchmark),
+                      probe_embedder.py, start_servers.sh
 tests/                stdlib unittest suite — no model server, no corpus, no network
 tests/eval/           generated locally from your corpus (gitignored)
 .github/workflows/    CI: the suite on 3.11 / 3.12 / 3.13
@@ -313,6 +393,15 @@ sqlite-vec column dimension is taken from the first response — so any embedder
 size works, but the dimension is fixed per table, so **delete `data/searchbot.db`
 and re-index after switching embedders**.
 
+Switching embedders has one quiet failure mode. A different *dimension* errors
+out; a different model of the *same* dimension does not — it just retrieves
+noise. Multi-model servers make this easy to hit: measured here, a request for
+`bge-m3` returned nomic-embed-text's 768-d vectors, and a request for a model
+that is not on the server at all returned HTTP 200 with someone else's vectors.
+`scripts/probe_embedder.py` settles it in one number by re-embedding text that is
+already indexed and reporting the cosine against the stored vector: 0.9999 is the
+model that built the index, 0.00 is not.
+
 If your embedder wants its own query prefix (bge, e5, gte), put it in
 `SEARCHBOT_QUERY_INSTRUCT`; it is applied to queries only, never to indexed passages.
 
@@ -350,6 +439,8 @@ Measured with the reference setup (llama.cpp chat + embeddinggemma-300M-Q8_0):
   which serve both from one endpoint.
 - **sqlite-vec dimension is fixed per table.** It is read from the first embedding
   response, so switching embedders means deleting and re-indexing the corpus.
+  Switching to a different model of the *same* dimension needs no re-index and so
+  produces no error — retrieval just degrades to noise. `probe_embedder.py` checks.
 - **libgen-mcp returns markdown.** `search` output is a markdown table, parsed to
   JSON by `libgen.py`; `results_per_page` accepts only 25/50/100; `download` needs
   `md5`/`doi`/`isbn` plus a `path` confined by `LIBGEN_MCP_ALLOWED_DOWNLOAD_DIRS`.

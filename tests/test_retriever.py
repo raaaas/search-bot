@@ -135,6 +135,17 @@ class RetrieveTest(support.TempCase):
             self.assertTrue(h["in_fts"])
             self.assertFalse(h["in_vec"])
 
+    def test_lexical_lane_is_disjunctive(self):
+        """Query terms living in different chunks must each still retrieve.
+
+        Space-separated quoted phrases mean AND in FTS5, so a document missing
+        any one query term left the candidate set entirely. That cost the lane
+        31% of its nDCG@10 against a textbook BM25 baseline on nfcorpus.
+        """
+        got = {h["chunk_id"] for h in
+               retriever.retrieve(self.c, "review case", lanes=("fts",))}
+        self.assertEqual(got, {self.mid, self.new_high})
+
     def test_one_lane_scores_are_a_subset_of_hybrid(self):
         """Each lane alone is a strict subset of the fused score sum."""
         base = self.scores()

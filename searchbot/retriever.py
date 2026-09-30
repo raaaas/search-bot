@@ -68,7 +68,7 @@ def retrieve(c, query: str, slug: str = None, k: int = None,
 
     # --- BM25 lane ---
     fts_hits = {}
-    terms = " ".join('"%s"' % t for t in _keywords(query)) if "fts" in lanes else ""
+    terms = " OR ".join('"%s"' % t for t in _keywords(query)) if "fts" in lanes else ""
     if terms:
         try:
             if slug:

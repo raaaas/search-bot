@@ -4,6 +4,64 @@ Change history for search-bot, newest first. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project is not
 version-tagged, so entries are dated.
 
+## 2026-10-01 — public benchmark (nfcorpus), lexical lane made disjunctive
+
+### Added
+- **nfcorpus benchmark** (`scripts/fetch_nfcorpus.py`, `scripts/bench_nfcorpus.py`) — the
+  engine measured against *public* questions and human judgments instead of anything
+  derived from this corpus: 323 TREC 2017/2018 biomedical questions, 3,633 PubMed
+  documents, 12,334 graded judgments. nDCG@10, MRR@10, Recall@100 and HitRate@100 are
+  implemented here in stdlib, at document level. nfcorpus is indexed into a throwaway
+  database per embedder under gitignored `data/bench/`, so the real corpus is never
+  opened and no corpus content is involved in the numbers.
+- **`bm25ref`** — a textbook Okapi BM25 (`k1=1.2`, `b=0.75`, inverted postings, no
+  stemming) written into the benchmark script and run over the same chunk text and the
+  same qrels. The baseline is computed on this machine rather than transcribed from a
+  leaderboard, where chunking and title handling differ enough to make the comparison
+  hollow.
+- **`scripts/probe_embedder.py`** — re-embeds text that is already stored and reports the
+  cosine against the vector in the table. Two 768-dimension models are indistinguishable
+  to SQLite, so this is the only way to know which embedder built an index. Exits 0 on a
+  match, 1 on a same-dimension mismatch, 2 on a dimension change.
+
+### Fixed
+- **The lexical lane was conjunctive.** Every keyword was emitted as a mandatory quoted
+  phrase and FTS5 separates terms by AND, so a document missing one term of the query was
+  gone from the candidate set. The engine's BM25 lane scored **0.2109** nDCG@10 on
+  nfcorpus while textbook BM25 over the same text scored **0.3069** — the engine's lexical
+  lane was 31% *below* the simplest possible baseline, and dragged hybrid down with it.
+  Terms are joined with `OR` now: BM25 lane 0.2109 → 0.3154, hybrid 0.2867 → 0.3190 on the
+  same index, and on the known-item set BM25 R@20 went 0.698 → 0.975 with misses 107 → 9.
+
+### Measured (nfcorpus test split, 323 questions, doc-level)
+
+| system | embedder | nDCG@10 | MRR@10 | Recall@100 | HitRate@100 |
+|---|---|---|---|---|---|
+| hybrid | nomic-embed-text | **0.3516** | 0.5698 | 0.2907 | 0.8421 |
+| hybrid | bge-m3 (1024-d) | 0.3414 | 0.5435 | 0.2749 | 0.8359 |
+| hybrid | embeddinggemma-300M | 0.3190 | 0.5089 | 0.2774 | 0.8452 |
+| vector lane | nomic-embed-text | 0.3465 | 0.5468 | 0.2806 | 0.8297 |
+| vector lane | bge-m3 | 0.3185 | 0.5233 | 0.2595 | 0.8173 |
+| BM25 lane | — | 0.3154 | 0.5183 | 0.2288 | 0.7802 |
+| BM25 reference | — | 0.3069 | 0.5151 | 0.2369 | 0.7709 |
+
+- Hybrid beats the computed BM25 baseline with all three public embedders:
+  +14.6% nDCG@10 (nomic), +11.2% (bge-m3), +3.9% (embeddinggemma).
+- Embedder choice is worth more than the fusion: the same hybrid code spans 3.3
+  nDCG@10 points across the three models. Fusion's contribution is inverse to the
+  embedder's quality though — +0.5 over nomic's dense lane, +2.3 over bge-m3's,
+  +12.3 over embeddinggemma's.
+- Model-name resolution on a multi-model server is not trustworthy: a request for
+  `bge-m3` returned nomic-embed-text's 768-d vectors (identical scores to the nomic
+  row, which is how it was caught), and a request for a model that does not exist
+  returned HTTP 200 with a 1024-d fallback. `probe_embedder.py` confirms an index's
+  embedder by cosine before trusting any number measured on it.
+
+### Superseded
+- The `Measured` numbers in the 2026-09-30 entry were taken with the conjunctive lexical
+  lane and understate every configuration; the README's known-item table now carries the
+  corrected ones (hybrid R@1 0.644 → 0.732, BM25 only 0.647 → 0.879).
+
 ## 2026-09-30 — retrieval benchmark, lane ablations, signals rescaled
 
 ### Added
