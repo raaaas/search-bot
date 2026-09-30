@@ -261,9 +261,10 @@ All via environment variables, no code edits needed:
 | `SEARCHBOT_EMBED_URL` | `http://127.0.0.1:8082/v1` | OpenAI-compatible embeddings endpoint |
 | `SEARCHBOT_EMBED_MODEL` | *(omitted from request)* | model name for multi-model embed servers |
 | `SEARCHBOT_QUERY_INSTRUCT` | embeddinggemma `Instruct: …\nQuery: ` | retrieval prefix added to queries only |
-| `SEARCHBOT_RECENCY_WEIGHT` | `0.0` | default recency boost for every query |
+| `SEARCHBOT_API_KEY` | *(none)* | Bearer token for a keyed provider, sent to both endpoints; a local server ignores it |
+| `SEARCHBOT_RECENCY_WEIGHT` | `0.0` | default recency multiplier for every query |
 | `SEARCHBOT_RECENCY_HALF_LIFE` | `10` | years for a paper's recency score to halve |
-| `SEARCHBOT_CITATION_WEIGHT` | `0.0` | default citation-count boost for every query |
+| `SEARCHBOT_CITATION_WEIGHT` | `0.0` | default citation multiplier for every query |
 | `SEARCHBOT_OPENALEX_URL` | `https://api.openalex.org/works` | citation-count source |
 | `SEARCHBOT_OPENALEX_BATCH` | `40` | identifiers per request |
 | `SEARCHBOT_MAILTO` | *(none)* | contact for OpenAlex's polite pool (higher rate limit) |
@@ -290,8 +291,20 @@ export SEARCHBOT_CHAT_URL=https://api.example.com/v1
 export SEARCHBOT_CHAT_MODEL=their-model
 export SEARCHBOT_EMBED_URL=https://api.example.com/v1
 export SEARCHBOT_EMBED_MODEL=their-embedding-model
+export SEARCHBOT_API_KEY=sk-…             # Bearer, both endpoints
 export SEARCHBOT_QUERY_INSTRUCT=
 ```
+
+A server that hosts many models behind one URL (Ollama, Unsloth Studio, vLLM with
+`--model-impl` swarms) is the same case: one `CHAT_URL`/`EMBED_URL`, and pick per
+request with `SEARCHBOT_CHAT_MODEL` / `SEARCHBOT_EMBED_MODEL`.
+
+Watch the dimension when switching embedders. Deleting and re-indexing is forced
+only when the *size* changes — `sqlite-vec` rejects the query — but two 768-d
+models are not the same space. Indexing with embeddinggemma and querying with
+nomic-embed returns confident nonsense with no error anywhere: measured, that
+mistake costs every bit of rank-1 precision (see [Benchmarks](#benchmarks)). If
+you swap GGUFs of the same size, re-index anyway.
 
 What the engine sends is the bare minimum of the spec: `{"input": [...]}`
 (plus `model` only when you set it) to `/embeddings`, and a standard

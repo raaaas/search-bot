@@ -22,7 +22,13 @@ version-tagged, so entries are dated.
   additive form had no usable range: a `0.02` weight cost 14–26 points of recall
   at rank 1 and `0.2` collapsed it to 0.18. The measured numbers behind both
   forms are in the README's Benchmarks section.
-- Test suite is 115 tests: the four signal tests now assert the multiplier
+- **Bearer auth** (`searchbot/llm.py`, `SEARCHBOT_API_KEY`) — the client sent no
+  `Authorization` header anywhere, so a keyed provider was simply unreachable and
+  the failure looked like a model problem: a 401 on `/v1/models` was swallowed and
+  the model id became `"default"`. The token now goes to chat, streaming chat,
+  embeddings and model autodetect; a local server ignores the header, so one knob
+  covers a mixed local + hosted setup.
+- Test suite is 119 tests: the four signal tests now assert the multiplier
   (`1 + w*signal`) rather than the additive bonus, and lane-restricted retrieval,
   the graceful-scaling property and the per-lane subset relation are covered.
 

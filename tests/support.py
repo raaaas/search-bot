@@ -50,7 +50,8 @@ class TempCase(unittest.TestCase):
         self._tmp = tempfile.mkdtemp(prefix="searchbot-test-")
         self._saved = {k: getattr(config, k) for k in
                        ("DATA_DIR", "DB_PATH", "SEARCH_DIR", "RECENCY_WEIGHT",
-                        "CITATION_WEIGHT", "RECENCY_HALF_LIFE_YEARS", "OPENALEX_BATCH")}
+                        "CITATION_WEIGHT", "RECENCY_HALF_LIFE_YEARS",
+                        "OPENALEX_BATCH", "API_KEY", "CHAT_MODEL")}
         config.DATA_DIR = pathlib.Path(self._tmp)
         config.DB_PATH = config.DATA_DIR / "test.db"
         config.SEARCH_DIR = config.DATA_DIR / "search"
@@ -58,6 +59,8 @@ class TempCase(unittest.TestCase):
         config.CITATION_WEIGHT = 0.0
         config.RECENCY_HALF_LIFE_YEARS = 10.0
         config.OPENALEX_BATCH = 40
+        config.API_KEY = ""
+        config.CHAT_MODEL = "test-model"
         self._embed = llm.embed
         llm.embed = embed_fake
         llm._embed_dim = DIM

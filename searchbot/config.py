@@ -23,6 +23,9 @@ EMBED_URL = os.environ.get("SEARCHBOT_EMBED_URL", "http://127.0.0.1:8082/v1")
 # Model name sent to the embeddings endpoint. llama.cpp serves one model and
 # ignores it; OpenAI-compatible multi-model servers (Ollama, vLLM, hosted) require it.
 EMBED_MODEL = os.environ.get("SEARCHBOT_EMBED_MODEL", "")
+# Bearer token for a keyed provider. Sent to both endpoints; a local llama.cpp /
+# Ollama server ignores the header, so one knob covers a mixed local+hosted setup.
+API_KEY = os.environ.get("SEARCHBOT_API_KEY", "")
 
 # Retrieval / prompt budget
 CHUNK_CHARS = 1100          # ~300 tokens per chunk

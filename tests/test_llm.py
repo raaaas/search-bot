@@ -9,10 +9,11 @@
 requests is replaced wholesale inside searchbot.llm, so nothing here opens a
 socket or needs a model server.
 """
+import json
 import sys
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 import support  # noqa: E402
-from searchbot import llm  # noqa: E402
+from searchbot import config, llm  # noqa: E402
 
 
 class FakeResponse:
@@ -42,15 +43,18 @@ class FakeRequests:
     def __init__(self, responses):
         self.responses = list(responses)
         self.sent = []
+        self.headers = []
 
     def post(self, url, json=None, timeout=None, stream=False, **kw):
         self.sent.append(json)
+        self.headers.append(kw.get("headers"))
         if not self.responses:
             raise AssertionError("FakeRequests ran out of canned responses")
         r = self.responses.pop(0)
         return r if isinstance(r, FakeResponse) else FakeResponse(r)
 
     def get(self, url, timeout=None, **kw):
+        self.headers.append(kw.get("headers"))
         return FakeResponse({"data": [{"id": "test-model"}]})
 
 
@@ -212,7 +216,47 @@ class ChatStreamTest(LLMRequestCase):
         self.assertIn("fallback answer", "".join(seen))
 
 
+class AuthTest(LLMRequestCase):
+    """A keyed provider is unreachable without a Bearer header, and a local
+    server must not receive one it did not ask for."""
+
+    def test_no_key_sends_no_header(self):
+        fake = self.plug([chat_body(" Ephedrine raises pressure.")])
+        llm.chat_llm([{"role": "user", "content": "q"}])
+        self.assertEqual(fake.headers, [{}])
+
+    def test_key_goes_to_chat_and_embeddings(self):
+        config.API_KEY = "sk-test"
+        fake = self.plug([chat_body("Ephedrine raises blood pressure.")])
+        llm.chat_llm([{"role": "user", "content": "q"}])
+        self.assertEqual(fake.headers[-1], {"Authorization": "Bearer sk-test"})
+        fake = self.plug([{"data": [{"index": 0, "embedding": [1.0, 0.0, 0.0]}]}])
+        llm.embed(["ephedrine"])
+        self.assertEqual(fake.headers[-1], {"Authorization": "Bearer sk-test"})
+
+    def test_streaming_carries_the_key(self):
+        config.API_KEY = "sk-test"
+        lines = ["data: " + json.dumps({"choices": [{"delta": {"content": "Ephedrine works."},
+                                                     "finish_reason": None}]}),
+                 "data: [DONE]"]
+        fake = self.plug([FakeResponse(None, stream_lines=lines)])
+        llm.chat_llm([{"role": "user", "content": "q"}], on_delta=lambda t: None)
+        self.assertEqual(fake.headers[-1], {"Authorization": "Bearer sk-test"})
+
+    def test_model_autodetect_is_authenticated(self):
+        """A 401 on /v1/models used to be swallowed into model id "default"."""
+        config.API_KEY = "sk-test"
+        config.CHAT_MODEL = ""
+        llm._chat_model = None
+        fake = self.plug([])
+        self.assertEqual(llm.chat_model(), "test-model")
+        self.assertEqual(fake.headers, [{"Authorization": "Bearer sk-test"}])
+
 class ChatModelTest(LLMRequestCase):
+    def setUp(self):
+        super().setUp()
+        config.CHAT_MODEL = ""      # TempCase pins a model; these test detection
+
     def test_auto_detects_from_models_endpoint(self):
         llm._chat_model = None
         self.plug([])

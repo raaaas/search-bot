@@ -13,6 +13,11 @@ from . import config
 _embed_dim = None
 
 
+def auth() -> dict:
+    """Bearer header for a keyed provider; empty dict for a local server."""
+    return {"Authorization": "Bearer " + config.API_KEY} if config.API_KEY else {}
+
+
 def embed(texts, is_query: bool = False, batch_size: int = 8):
     """Return list of np vectors (normalized). Queries get a retrieval-instruction prefix."""
     global _embed_dim
@@ -23,7 +28,8 @@ def embed(texts, is_query: bool = False, batch_size: int = 8):
         if config.EMBED_MODEL:
             payload["model"] = config.EMBED_MODEL
         # vectors are L2-normalized here, so no server-side normalize option is used
-        r = requests.post(config.EMBED_URL + "/embeddings", json=payload, timeout=180)
+        r = requests.post(config.EMBED_URL + "/embeddings", json=payload,
+                          headers=auth(), timeout=180)
         if r.status_code == 500 and len(batch) > 1:
             # one oversized text poisons the batch — go one-by-one
             for one in batch:
@@ -60,7 +66,8 @@ def chat_model():
         return config.CHAT_MODEL
     if _chat_model is None:
         try:
-            data = requests.get(config.CHAT_URL + "/models", timeout=10).json()["data"]
+            data = requests.get(config.CHAT_URL + "/models",
+                                headers=auth(), timeout=10).json()["data"]
             _chat_model = data[0]["id"]
         except Exception:
             _chat_model = "default"
@@ -89,7 +96,7 @@ def sanitize(text: str) -> str:
 
 def _one_shot(payload):
     r = requests.post(config.CHAT_URL + "/chat/completions", json=payload,
-                      timeout=config.QUERY_TIMEOUT_S)
+                      headers=auth(), timeout=config.QUERY_TIMEOUT_S)
     r.raise_for_status()
     choice = r.json()["choices"][0]
     return (choice["message"].get("content") or "").strip(), \
@@ -105,7 +112,7 @@ def _stream_once(payload, on_delta):
     finish = None
     r = requests.post(config.CHAT_URL + "/chat/completions",
                       json={**payload, "stream": True},
-                      timeout=config.QUERY_TIMEOUT_S, stream=True)
+                      headers=auth(), timeout=config.QUERY_TIMEOUT_S, stream=True)
     r.raise_for_status()
     for raw_line in r.iter_lines(decode_unicode=True):
         if not raw_line or not raw_line.startswith("data: "):
