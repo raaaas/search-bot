@@ -37,7 +37,11 @@ QUERY_TIMEOUT_S = 180
 # Ranking signals, applied on top of RRF. Both default to 0.0 so retrieval
 # behaves exactly as before until you ask for them; weights are per-call
 # overridable (see retriever.retrieve / /api/ask / the `ask` MCP tool).
-#   final = rrf + recency_weight * 0.5**(age/HALF_LIFE) + citation_weight * log1p(n)/log1p(max)
+#   final = rrf * (1 + recency_weight * 0.5**(age/HALF_LIFE)
+#                    + citation_weight * log1p(n)/log1p(candidate_max))
+# Multiplicative because adjacent RRF ranks sit ~1e-4 apart; an additive bonus
+# of any usable size rewrites the ranking outright. Measured optimum is small:
+# 0.05 on either signal, more than ~0.2 starts trading relevance for metadata.
 RECENCY_WEIGHT = float(os.environ.get("SEARCHBOT_RECENCY_WEIGHT", "0.0"))
 RECENCY_HALF_LIFE_YEARS = float(os.environ.get("SEARCHBOT_RECENCY_HALF_LIFE", "10"))
 CITATION_WEIGHT = float(os.environ.get("SEARCHBOT_CITATION_WEIGHT", "0.0"))

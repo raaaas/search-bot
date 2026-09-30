@@ -32,36 +32,43 @@ def rank_opts(src) -> dict:
 
 def retrieve(c, query: str, slug: str = None, k: int = None,
              year_after: int = None, year_before: int = None,
-             recency: float = None, citations: float = None):
+             recency: float = None, citations: float = None,
+             lanes=("vec", "fts")):
     """Hybrid retrieval with optional metadata signals.
 
     year_after / year_before restrict candidates to a publication-year range;
     a doc with no recoverable year is excluded when either bound is set.
-    recency and citations are additive weights on the RRF score, defaulting to
-    config (0.0 = pure RRF, i.e. the historical behaviour).
+    recency and citations multiply the RRF score by (1 + w*signal), signal in
+    [0,1]; they default to config (0.0 = pure RRF, i.e. the historical
+    behaviour). Multiplicative is deliberate: adjacent RRF ranks differ by
+    ~1e-4, so an additive bonus of any usable size rewrites the ranking.
+
+    lanes can be narrowed to ("vec",) or ("fts",) — for ablation measurements
+    of one lane, and for a corpus whose vector index is unusable.
     """
     k = k or config.FINAL_K
     recall = config.RECALL_K
     w_rec = config.RECENCY_WEIGHT if recency is None else recency
     w_cit = config.CITATION_WEIGHT if citations is None else citations
-    qvec = llm.embed([query], is_query=True)[0]
+    qvec = llm.embed([query], is_query=True)[0] if "vec" in lanes else None
 
     # --- vector lane ---
     vec_hits = {}
-    if slug:
-        rows = c.execute(
-            "SELECT chunk_id, distance FROM chunks_vec WHERE embedding MATCH ? AND k = ? AND slug = ? ORDER BY distance",
-            (db.ser(qvec), recall, slug)).fetchall()
-    else:
-        rows = c.execute(
-            "SELECT chunk_id, distance FROM chunks_vec WHERE embedding MATCH ? AND k = ? ORDER BY distance",
-            (db.ser(qvec), recall)).fetchall()
-    for rank, r in enumerate(rows):
-        vec_hits[r["chunk_id"]] = rank
+    if "vec" in lanes:
+        if slug:
+            rows = c.execute(
+                "SELECT chunk_id, distance FROM chunks_vec WHERE embedding MATCH ? AND k = ? AND slug = ? ORDER BY distance",
+                (db.ser(qvec), recall, slug)).fetchall()
+        else:
+            rows = c.execute(
+                "SELECT chunk_id, distance FROM chunks_vec WHERE embedding MATCH ? AND k = ? ORDER BY distance",
+                (db.ser(qvec), recall)).fetchall()
+        for rank, r in enumerate(rows):
+            vec_hits[r["chunk_id"]] = rank
 
     # --- BM25 lane ---
     fts_hits = {}
-    terms = " ".join('"%s"' % t for t in _keywords(query))
+    terms = " ".join('"%s"' % t for t in _keywords(query)) if "fts" in lanes else ""
     if terms:
         try:
             if slug:
@@ -90,15 +97,17 @@ def retrieve(c, query: str, slug: str = None, k: int = None,
     if (w_rec or w_cit or year_after or year_before) and scores:
         meta = _doc_meta(c, scores, year_after=year_after, year_before=year_before)
         scores = meta["scores"]
-        if w_rec:
-            for cid in list(scores):
-                scores[cid] += w_rec * meta["recency"].get(cid, 0.0)
-        if w_cit:
+        if w_rec or w_cit:
             ceiling = meta["cit_ceiling"]
             for cid in list(scores):
-                n = meta["citations"].get(cid)
-                if n:
-                    scores[cid] += w_cit * (math.log1p(n) / ceiling)
+                factor = 1.0
+                if w_rec:
+                    factor += w_rec * meta["recency"].get(cid, 0.0)
+                if w_cit:
+                    n = meta["citations"].get(cid)
+                    if n:
+                        factor += w_cit * (math.log1p(n) / ceiling)
+                scores[cid] *= factor
 
     top = sorted(scores.items(), key=lambda x: -x[1])[:k]
     out = []

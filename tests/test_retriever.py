@@ -65,46 +65,84 @@ class RetrieveTest(support.TempCase):
         self.assertEqual(self.scores(), self.scores(year_before=2100))
 
     def test_recency_weight_prefers_newer(self):
-        base_old = self.scores()[self.old_low]
-        boost_old = self.scores(recency=1.0)[self.old_low] - base_old
-        boost_new = self.scores(recency=1.0)[self.new_low] - self.scores()[self.new_low]
-        self.assertGreater(boost_new, boost_old)
+        base, boost = self.scores(), self.scores(recency=1.0)
+        mult_old = boost[self.old_low] / base[self.old_low]
+        mult_new = boost[self.new_low] / base[self.new_low]
+        self.assertGreater(mult_new, mult_old)
         self.assertNotEqual(self.ids(recency=1.0), self.ids(), "a weight of 1.0 must move things")
 
     def test_recency_decay_respects_half_life(self):
-        """Boost is 0.5 ** (age/half_life); with half_life=1 a 2020 doc in a
-        2026-year run gets 0.5**age, which the code must match exactly."""
+        """Boost is a multiplier of 1 + 0.5 ** (age/half_life); with half_life=1 a
+        2020 doc in a 2026-year run gets 0.5**age, which the code must match exactly."""
         import datetime
         config.RECENCY_HALF_LIFE_YEARS = 1.0
         age = datetime.datetime.now().year - 2020
         base = self.scores()[self.new_high]
         boosted = self.scores(recency=1.0)[self.new_high]
-        self.assertAlmostEqual(base + 0.5 ** age, boosted, places=4)
+        self.assertAlmostEqual(base * (1.0 + 0.5 ** age), boosted, places=4)
 
     def test_recency_boost_shrinks_with_age(self):
         config.RECENCY_HALF_LIFE_YEARS = 5.0
-        near = self.scores(recency=1.0)[self.new_high] - self.scores()[self.new_high]
-        far = self.scores(recency=1.0)[self.old_low] - self.scores()[self.old_low]
-        self.assertGreater(near, far)
+        base, boost = self.scores(), self.scores(recency=1.0)
+        self.assertGreater(boost[self.new_high] / base[self.new_high],
+                           boost[self.old_low] / base[self.old_low])
 
     def test_citation_weight_prefers_cited(self):
         order = self.ids(citations=1.0)
         self.assertEqual(order[0], self.new_high)
         base = self.scores()[self.new_high]
-        self.assertAlmostEqual(base + 1.0, self.scores(citations=1.0)[self.new_high], places=4,
-                               msg="top-cited candidate gets exactly the full weight")
+        self.assertAlmostEqual(base * 2.0, self.scores(citations=1.0)[self.new_high], places=4,
+                               msg="the ceiling candidate gets one full weight")
 
     def test_citation_log_scale_is_relative_to_candidates(self):
-        """log1p over the candidate set: 4000 is the ceiling, so mid gets log1p(40)/log1p(4000)."""
+        """log1p over the candidate set: 4000 is the ceiling, so mid gets
+        1 + log1p(40)/log1p(4000) as its multiplier."""
         import math
         base, boosted = self.scores(), self.scores(citations=1.0)
         # scores are rounded to 5dp in retrieve(), so compare at 4dp
-        self.assertAlmostEqual(base[self.mid] + math.log1p(40) / math.log1p(4000),
+        self.assertAlmostEqual(base[self.mid] * (1.0 + math.log1p(40) / math.log1p(4000)),
                               boosted[self.mid], places=4)
 
     def test_uncounted_docs_get_no_boost(self):
         noid = self.add_doc("t", "Untracked", "2021", None)
         self.assertEqual(self.scores()[noid], self.scores(citations=1.0)[noid])
+
+    def test_signals_scale_gracefully(self):
+        """Each signal is a multiplier in [1, 1+w], so the damage grows with the
+        weight. An additive bonus would have no such regime: adjacent RRF ranks
+        differ by ~1e-4, so any weight above that is already a full reshuffle."""
+        base = self.ids()
+
+        def moved(ids):
+            return sum(abs(ids.index(cid) - base.index(cid)) for cid in base)
+
+        self.assertEqual(moved(self.ids(recency=0.0, citations=0.0)), 0)
+        self.assertLess(moved(self.ids(recency=0.001)), moved(self.ids(recency=1.0)))
+        self.assertLess(moved(self.ids(citations=0.001)), moved(self.ids(citations=1.0)))
+        self.assertGreater(moved(self.ids(recency=1.0)), 0, "w=1.0 must be able to move things")
+
+    def test_lane_vec_only(self):
+        hits = retriever.retrieve(self.c, self.QUERY, lanes=("vec",))
+        self.assertTrue(hits)
+        for h in hits:
+            self.assertTrue(h["in_vec"])
+            self.assertFalse(h["in_fts"])
+
+    def test_lane_fts_only(self):
+        hits = retriever.retrieve(self.c, self.QUERY, lanes=("fts",))
+        self.assertTrue(hits)
+        for h in hits:
+            self.assertTrue(h["in_fts"])
+            self.assertFalse(h["in_vec"])
+
+    def test_one_lane_scores_are_a_subset_of_hybrid(self):
+        """Each lane alone is a strict subset of the fused score sum."""
+        base = self.scores()
+        vec = self.scores(lanes=("vec",))
+        fts = self.scores(lanes=("fts",))
+        self.assertEqual(set(base), set(vec) | set(fts))
+        for cid in vec:
+            self.assertLessEqual(vec[cid], base[cid])
 
     def test_slug_scope_limits_candidates(self):
         other = self.add_doc("u", "Elsewhere ephedrine", "2023", 900)
