@@ -76,18 +76,22 @@ RRF alone is relevance-only. Retrieval accepts four optional signals on top of i
 | signal | what it does |
 |---|---|
 | `year_after` / `year_before` | drop candidates outside a publication-year range (a doc with no recoverable year is excluded when a bound is set, rather than passing as "recent enough") |
-| `recency` | additive weight: `0.5 ** (age / SEARCHBOT_RECENCY_HALF_LIFE)` |
-| `citations` | additive weight: OpenAlex `cited_by_count`, log-scaled against the strongest candidate |
+| `recency` | multiplier `1 + w * 0.5 ** (age / SEARCHBOT_RECENCY_HALF_LIFE)` |
+| `citations` | multiplier `1 + w * log1p(n)/log1p(strongest candidate)`, OpenAlex `cited_by_count` |
 
 Both weights default to `0.0`, so an untouched query stays pure RRF and the
-ordering is exactly what it was.
+ordering is exactly what it was. They are **multiplicative** on purpose: adjacent
+RRF ranks sit about `1e-4` apart, so an additive bonus big enough to matter is
+also big enough to replace the ranking. Measured useful range is small — `0.05`
+on either signal helps, `0.2` starts trading relevance for metadata
+(see [Benchmarks](#benchmarks)).
 
 ```bash
-.venv/bin/python scripts/ask.py ephedra --after 2015 --recency 0.2
-.venv/bin/python scripts/ask.py ephedra --citations 0.3
+.venv/bin/python scripts/ask.py ephedra --after 2015 --recency 0.05
+.venv/bin/python scripts/ask.py ephedra --citations 0.05
 
 curl -s 127.0.0.1:8181/api/ask -H 'Content-Type: application/json' \
-     -d '{"slug":"ephedra","question":"…","year_after":2015,"recency":0.2}'
+     -d '{"slug":"ephedra","question":"…","year_after":2015,"recency":0.05}'
 ```
 
 `citations` needs counts in the database, so backfill once per corpus (and
@@ -105,6 +109,61 @@ DOI missed. Works OpenAlex does not know are stamped `openalex:not-found` so a
 re-run does not re-query the same dead ends, while a failed request leaves rows
 untouched and retries next time. Set `SEARCHBOT_MAILTO` to use OpenAlex's polite
 pool; without it the anonymous rate limit applies.
+
+## Benchmarks
+
+Retrieval is measured against a labeled set rather than by feel. The set is
+generated locally from **your** corpus and is gitignored like the PDFs it comes
+from — it is a list of paper titles and PMIDs, which is corpus content, not code:
+
+```bash
+.venv/bin/python scripts/build_eval_set.py --docs 120 --seed 7   # -> tests/eval/known_item.json
+.venv/bin/python scripts/bench_retrieval.py --lanes hybrid bm25 vec \
+       --recency 0.05 --citations 0.05 --json /tmp/bench.json
+```
+
+`build_eval_set.py` derives gold **by construction** from the indexed corpus, in
+three query families: a paper's own title (known-item search), a verbatim
+mid-document sentence, and a short typed keyword string. Public QA sets were the
+first choice and are unusable here: the BioASQ mirrors expose no resolvable PMIDs
+and PubMedQA needs a 233 MB download for a handful of matches — measured overlap
+with this corpus was **0 questions**. Corpus-derived gold is objective, but it
+means these numbers say nothing about paraphrase robustness, which is the axis
+real questions stress. That gap is open.
+
+Whole corpus (607 papers / 20,700 chunks), 354 queries, doc-level metric — a hit
+is *any* chunk of the right paper reaching the cutoff:
+
+| config | R@1 | R@5 | R@8 | R@20 | MRR | miss |
+|---|---|---|---|---|---|---|
+| hybrid (vec+BM25, RRF) | 0.644 | 0.918 | 0.932 | 0.952 | 0.773 | 17 |
+| BM25 only | 0.647 | 0.678 | 0.686 | 0.698 | 0.662 | 107 |
+| vector only | 0.537 | 0.675 | 0.726 | 0.805 | 0.603 | 69 |
+| hybrid + recency 0.05 | 0.701 | 0.910 | 0.929 | 0.952 | 0.792 | 17 |
+| hybrid + citations 0.05 | **0.732** | 0.927 | **0.935** | 0.955 | **0.813** | 16 |
+
+What the numbers say:
+
+- **Fusion buys recall depth, not rank 1.** BM25 ties hybrid at R@1 and then
+  falls off a cliff: 107 queries with no chunk of the right paper in the top 20,
+  against 17 for hybrid. The vector lane's job is to put the paper *in* the
+  candidate set; at top-8 (what the prompt uses) hybrid is worth 25 points.
+- **BM25 wins verbatim prose outright** — 0.871 R@1 on sentence queries against
+  hybrid's 0.534, because an exact sentence is a lexical lock and the vector
+  lane spends votes on near-neighbour chunks. Per-family tables are printed
+  alongside the overall one for exactly this reason.
+- **Both metadata signals help at 0.05.** Under the multiplicative form the cost
+  of over-weighting grows smoothly — at `0.2` recency is still worth a point and
+  citations costs four, at `1.0` they cost 7 and 19 points of R@1. The additive
+  form this replaced had **no usable range**: `0.02` already cost 14 points
+  (recency) or 26 (citations), and `0.2` collapsed hybrid R@1 to 0.18.
+
+The corpus index and the query embedder must be the **same model**. Indexing
+with embedder A and querying with B does not error, it just returns noise: with
+the vector lane fed by a mismatched model, hybrid R@1 was **0.000** across all
+354 queries — worse than disabling it, because the garbage votes occupy the top
+RRF slots and push BM25's correct chunk down. If retrieval ever feels like it is
+"just BM25", run `--lanes vec` and look at the miss count.
 
 ## Agentic trace UI
 
@@ -146,8 +205,10 @@ searchbot/            the engine (importable package)
   mcp_server.py       stdio MCP server (JSON-RPC 2.0)
   webserver.py        127.0.0.1:8181 JSON API + static UI
 web/index.html        chat UI with evidence panel
-scripts/              index.py, ask.py, citations.py, start_servers.sh
+scripts/              index.py, ask.py, citations.py, build_eval_set.py,
+                      bench_retrieval.py, start_servers.sh
 tests/                stdlib unittest suite — no model server, no corpus, no network
+tests/eval/           generated locally from your corpus (gitignored)
 .github/workflows/    CI: the suite on 3.11 / 3.12 / 3.13
 CHANGELOG.md          dated update log
 searchbot_mcp.py      standalone MCP entry point for clients that scrub cwd/PYTHONPATH

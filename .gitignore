@@ -28,6 +28,10 @@ search/
 *.bib
 data/libgen_downloads/
 
+# --- Eval set: titles/PMIDs lifted from your own DB, generated locally ---
+#     (scripts/build_eval_set.py writes it; the corpus itself is not published)
+tests/eval/
+
 # --- Third-party binaries (25 MB static Go) + checksums ---
 bin/
 

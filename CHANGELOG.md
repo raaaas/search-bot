@@ -4,6 +4,36 @@ Change history for search-bot, newest first. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project is not
 version-tagged, so entries are dated.
 
+## 2026-09-30 — retrieval benchmark, lane ablations, signals rescaled
+
+### Added
+- **Retrieval benchmark** (`scripts/build_eval_set.py`, `scripts/bench_retrieval.py`)
+  — doc-level recall@1/5/8/20, MRR and nDCG@8 over a labeled set drawn from your
+  own corpus in three query families (title, verbatim sentence, keyword string),
+  reported overall and per family. The generated set lands in `tests/eval/`,
+  which is gitignored: it is corpus content (titles and PMIDs), not code.
+- **Lane ablation** (`searchbot/retriever.py`) — `retrieve(..., lanes=("vec",))`
+  measures one lane at a time, and is the fallback for a corpus whose vector
+  index does not match the live embedder.
+
+### Changed
+- **`recency` and `citations` are now multiplicative** (`rrf * (1 + w*signal)`)
+  instead of added to the RRF score. Adjacent RRF ranks sit ~1e-4 apart, so the
+  additive form had no usable range: a `0.02` weight cost 14–26 points of recall
+  at rank 1 and `0.2` collapsed it to 0.18. The measured numbers behind both
+  forms are in the README's Benchmarks section.
+- Test suite is 115 tests: the four signal tests now assert the multiplier
+  (`1 + w*signal`) rather than the additive bonus, and lane-restricted retrieval,
+  the graceful-scaling property and the per-lane subset relation are covered.
+
+### Measured
+- Reference corpus, 354 queries: hybrid R@8 0.932 vs BM25 0.686 (fusion's gain is
+  candidate coverage — 17 unanswered queries against 107), and hybrid + citations
+  at 0.05 lifts R@1 from 0.644 to 0.732.
+- Querying an index built by a different embedder does not error — hybrid R@1
+  went to **0.000** with the vector lane fed by a mismatched model, worse than
+  disabling the lane (BM25 alone: 0.647).
+
 ## 2026-09-30 — license, test suite, ranking signals
 
 ### Added
