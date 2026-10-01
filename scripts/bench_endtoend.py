@@ -232,24 +232,33 @@ fh.close()
 # -------------------------------------------------------------------- scoring
 def score(model, arm):
     """accuracy, macro-F1 and per-class recall over the gold-labeled claims."""
-    tp = Counter(); fp = Counter(); tot = Counter(); unparsed = 0
+    tp = Counter(); fp = Counter(); tot = Counter(); unparsed = 0; answered = 0
     for cl in claims:
         p = done.get((cl["id"], model, arm), "MISSING")
         g = cl["gold"]
         tot[g] += 1
+        if p == "MISSING":
+            continue
+        # A refusal to parse and a server error are both failures to answer, and
+        # both count against accuracy — but they are reported separately, because
+        # a row whose real story is "the model would not commit to a verdict"
+        # must not read as a row whose story is "the model was wrong".
+        unparsed += p in ("UNPARSED", "ERROR")
+        answered += p not in ("UNPARSED", "ERROR")
         tp[g] += p == g
         fp[p] += p != g
-        unparsed += p in ("UNPARSED", "MISSING")
     f1, rec = [], {}
-    for lab in ("SUPPORTS", "REFUTES", "NOT_ENOUGH_EVIDENCE"):
+    present = [lab for lab in ("SUPPORTS", "REFUTES", "NOT_ENOUGH_EVIDENCE") if tot[lab]]
+    for lab in present:
         prec = tp[lab] / (tp[lab] + fp[lab]) if tp[lab] + fp[lab] else 0.0
-        r = tp[lab] / tot[lab] if tot[lab] else 0.0
+        r = tp[lab] / tot[lab]
         rec[lab] = r
         f1.append(2 * prec * r / (prec + r) if prec + r else 0.0)
-    return {"acc": round(sum(tp.values()) / len(claims), 4),
-            "macroF1": round(sum(f1) / 3, 4),
-            "R_sup": round(rec["SUPPORTS"], 4), "R_ref": round(rec["REFUTES"], 4),
-            "R_abstain": round(rec["NOT_ENOUGH_EVIDENCE"], 4),
+    return {"n": len(claims), "answered": answered,
+            "acc": round(sum(tp.values()) / len(claims), 4),
+            "macroF1": round(sum(f1) / len(present), 4),
+            "R_sup": round(rec.get("SUPPORTS", 0.0), 4), "R_ref": round(rec.get("REFUTES", 0.0), 4),
+            "R_abstain": round(rec.get("NOT_ENOUGH_EVIDENCE", 0.0), 4),
             "unparsed": unparsed}
 
 
@@ -268,11 +277,11 @@ if "retrieved" in a.arms:
           f"{gold_in_evidence}/{gold_claim_total} claims that have a gold abstract "
           f"({len(claims) - gold_claim_total} are the abstention class and have none by definition)")
 print()
-print(f"{'system|arm':<28}{'acc':>7}{'macroF1':>9}{'R_sup':>7}{'R_ref':>7}"
-      f"{'R_abstain':>10}{'unparsed':>9}")
+print(f"{'system|arm':<28}{'n':>5}{'answered':>9}{'acc':>7}{'macroF1':>9}{'R_sup':>7}"
+      f"{'R_ref':>7}{'R_abstain':>10}{'unparsed':>9}")
 for name, r in results.items():
-    print(f"{name:<28}{r['acc']:>7}{r['macroF1']:>9}{r['R_sup']:>7}{r['R_ref']:>7}"
-          f"{r['R_abstain']:>10}{r['unparsed']:>9}")
+    print(f"{name:<28}{r['n']:>5}{r['answered']:>9}{r['acc']:>7}{r['macroF1']:>9}"
+          f"{r['R_sup']:>7}{r['R_ref']:>7}{r['R_abstain']:>10}{r['unparsed']:>9}")
 print(f"\nR_abstain is the NOT_ENOUGH_EVIDENCE class — the only score a system can")
 print(f"earn by declining to guess. Guessing the majority class scores {floor:.3f}.")
 
