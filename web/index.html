@@ -1,279 +1,2340 @@
 <!DOCTYPE html>
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
-<!-- search-bot — Copyright (C) 2026 raaaas — GNU GPL-3.0-only, see LICENSE -->
+<!-- Search Bot — Grounded Scientific RAG Engine -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Search Bot — grounded RAG</title>
+<title>Search Bot — Grounded Scientific RAG</title>
+<meta name="description" content="Grounded scientific RAG search bot that finds papers, queries literature, indexes evidence, and answers questions with verifiable citations.">
+<meta property="og:title" content="Search Bot — Grounded Scientific RAG">
+<meta property="og:description" content="Grounded scientific RAG search bot that finds papers, queries literature, indexes evidence, and answers questions with verifiable citations.">
 <style>
-:root{--bg:#0b0e13;--panel:#141923;--border:#242c39;--fg:#dfe6f2;--mut:#8290a6;
---acc:#4f8ff7;--ok:#3ecf8e;--warn:#e8b33c;--err:#ef6a6a;--tool:#a78bfa;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-*{box-sizing:border-box}
-body{margin:0;font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg);display:flex;height:100vh}
-aside{width:280px;min-width:280px;background:var(--panel);border-right:1px solid var(--border);padding:12px;display:flex;flex-direction:column;gap:9px;overflow:auto}
-main{flex:1;display:flex;flex-direction:column;min-width:0}
-h1{font-size:15px;margin:0;color:var(--acc)}
-.small{font-size:12px;color:var(--mut)}
-input,button,select{font:inherit;background:#0a0d12;color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:7px 10px}
-button{cursor:pointer}button:hover{border-color:var(--acc)}
-#chat{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
-.msg{max-width:88%;padding:10px 14px;border-radius:12px;white-space:pre-wrap;overflow-wrap:break-word}
-.user{align-self:flex-end;background:#1c3457}
-.assistant{align-self:flex-start;background:var(--panel);border:1px solid var(--border)}
-.sysline{align-self:center;font-size:12px;color:var(--mut)}
-/* ---- agent trace ---- */
-.trace{align-self:flex-start;width:88%;background:#0d1117;border:1px solid var(--border);border-radius:12px;overflow:hidden;font-size:12.5px}
-.thead{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#111826;border-bottom:1px solid var(--border);cursor:pointer;user-select:none}
-.thead .st{font-weight:600;color:var(--tool)}
-.thead .tm{margin-left:auto;color:var(--mut);font-family:var(--mono);font-size:11px}
-.thead .chev{transition:transform .15s;color:var(--mut)}
-.trace.closed .chev{transform:rotate(-90deg)}
-.trace.closed .tbody{display:none}
-.tbody{max-height:340px;overflow:auto}
-.step{display:flex;gap:8px;padding:6px 12px;border-bottom:1px solid #1a212d;align-items:flex-start}
-.step:last-child{border-bottom:none}
-.step .ic{width:16px;flex:none;text-align:center;margin-top:1px}
-.step .body{flex:1;min-width:0}
-.step .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.02em;color:var(--acc)}
-.step .lbl.acquire,.step .lbl.download,.step .lbl.download_done,.step .lbl.download_error,.step .lbl.libgen_search,.step .lbl.libgen_results,.step .lbl.skip_dup,.step .lbl.acquire_target,.step .lbl.acquire_plan{color:var(--tool)}
-.step .lbl.generate,.step .lbl.generate_done,.step .lbl.prompt{color:var(--ok)}
-.step .lbl.gate,.step .lbl.index,.step .lbl.index_done,.step .lbl.memory,.step .lbl.merge,.step .lbl.merge_extra{color:var(--warn)}
-.step .lbl.error,.step .lbl.download_error{color:var(--err)}
-.step .txt{color:var(--fg);word-break:break-word}
-.step .ms{color:var(--mut);font-family:var(--mono);font-size:11px;flex:none}
-.hitlist{margin:4px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px}
-.hitlist li{background:#131a26;border:1px solid #1d2634;border-radius:6px;padding:4px 8px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.hitlist li b{color:var(--fg);font-weight:500}
-.hitlist .lane{font-family:var(--mono);font-size:10.5px;padding:1px 5px;border-radius:4px;margin-right:6px}
-.lane.vf{background:#1b3a2c;color:var(--ok)}.lane.v{background:#17324f;color:var(--acc)}.lane.f{background:#3d3417;color:var(--warn)}
-.sc{float:right;font-family:var(--mono);color:var(--mut)}
-.ev{align-self:flex-start;width:88%;font-size:12px;color:var(--mut);background:#0d1117;border:1px solid var(--border);border-radius:12px;padding:9px 12px}
-.ev b{color:var(--fg)}.ev .row{padding:3px 0;border-bottom:1px dashed #1a212d}
-.ev .row:last-child{border:none}
-.ev a{color:var(--acc);text-decoration:none}
-#bar{display:flex;gap:8px;padding:12px;border-top:1px solid var(--border)}
-#q{flex:1}
-.caret{display:inline-block;width:7px;height:15px;background:var(--acc);margin-left:2px;vertical-align:-2px;animation:blink .8s steps(1) infinite;border-radius:1px}
-@keyframes blink{50%{opacity:0}}
-.spin{display:inline-block;width:11px;height:11px;border:2px solid var(--tool);border-top-color:transparent;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-1px}
-@keyframes sp{to{transform:rotate(360deg)}}
-.sr{padding:6px;border-radius:8px;cursor:pointer;border:1px solid transparent;display:flex;justify-content:space-between;gap:6px;align-items:center}
-.sr.on{background:#1c3457;border-color:var(--acc)}.sr:hover{border-color:var(--acc)}
-.sess{padding:5px 8px;border-radius:8px;cursor:pointer;border:1px solid transparent;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sess.on{background:#152a44;border-color:var(--acc)}.sess:hover{border-color:var(--acc)}
-.lg{border-top:1px solid var(--border);margin-top:6px;padding-top:8px}
-.lg .r{font-size:12px;padding:6px;border-bottom:1px solid var(--border)}
-.lg .r button{font-size:11px;padding:2px 8px;margin-top:3px}
-.pending{color:var(--warn)}.tag{color:var(--acc);font-weight:600}
-hr{border:none;border-top:1px solid var(--border);margin:2px 0}
-.badge{font-size:10.5px;padding:1px 7px;border-radius:99px;background:#1c3457;color:var(--acc)}
+:root {
+  --bg: #090d16;
+  --sidebar-bg: #0e1422;
+  --card-bg: #141b2d;
+  --card-border: #202b42;
+  --input-bg: #111827;
+  --fg: #e2e8f0;
+  --fg-muted: #94a3b8;
+  --fg-subtle: #64748b;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --accent-subtle: rgba(59, 130, 246, 0.12);
+  --success: #10b981;
+  --success-subtle: rgba(16, 185, 129, 0.12);
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --tool: #8b5cf6;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  height: 100vh;
+  display: flex;
+  overflow: hidden;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* App Layout */
+#app {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Sidebar (ChatGPT / Grok style) */
+#sidebar {
+  width: 270px;
+  min-width: 270px;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--card-border);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s ease, width 0.2s ease;
+  z-index: 30;
+}
+
+#sidebar.collapsed {
+  width: 0;
+  min-width: 0;
+  transform: translateX(-100%);
+  overflow: hidden;
+  border-right: none;
+}
+
+.sidebar-header {
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  color: #fff;
+}
+
+.brand-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: #fff;
+  font-weight: bold;
+}
+
+.btn-icon {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+
+.btn-icon:hover {
+  background: var(--card-border);
+  color: var(--fg);
+}
+
+.new-chat-btn {
+  margin: 12px 14px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #1e293b;
+  border: 1px solid var(--card-border);
+  color: #fff;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.new-chat-btn:hover {
+  background: #283548;
+  border-color: #3b82f6;
+}
+
+.sidebar-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.sidebar-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-subtle);
+  font-weight: 600;
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.corpus-list, .sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.corpus-item, .session-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--fg-muted);
+  border: 1px solid transparent;
+  transition: all 0.12s ease;
+  user-select: none;
+}
+
+.corpus-item:hover, .session-item:hover {
+  background: #162032;
+  color: var(--fg);
+}
+
+.corpus-item.active, .session-item.active {
+  background: #1c273e;
+  border-color: #2b3b5c;
+  color: #fff;
+  font-weight: 500;
+}
+
+.item-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.item-meta {
+  font-size: 11px;
+  color: var(--fg-subtle);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.corpus-item.active .item-meta {
+  color: #93c5fd;
+}
+
+.sidebar-footer {
+  border-top: 1px solid var(--card-border);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #0b101c;
+}
+
+.token-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #131a29;
+  border: 1px solid var(--card-border);
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+
+.token-pill b {
+  color: #60a5fa;
+  font-family: var(--font-mono);
+}
+
+.footer-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--fg-muted);
+  font-size: 13px;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  transition: all 0.15s;
+}
+
+.footer-btn:hover {
+  background: #162032;
+  color: var(--fg);
+  border-color: var(--card-border);
+}
+
+/* Main Viewport */
+#main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  position: relative;
+  height: 100vh;
+}
+
+/* Header (ChatGPT / Grok Top bar) */
+.main-header {
+  height: 54px;
+  border-bottom: 1px solid var(--card-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: rgba(9, 13, 22, 0.85);
+  backdrop-filter: blur(12px);
+  z-index: 20;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.model-pill-switcher {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #141b2d;
+  border: 1px solid var(--card-border);
+  padding: 5px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.model-pill-switcher:hover {
+  border-color: #3b82f6;
+  background: #1c273e;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.badge-tag {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #162032;
+  border: 1px solid var(--card-border);
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+}
+
+/* Embedder Mismatch Alert Banner */
+.mismatch-banner {
+  background: #2b1d0c;
+  border-bottom: 1px solid #78350f;
+  color: #fde68a;
+  padding: 8px 16px;
+  font-size: 12.5px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  z-index: 15;
+}
+
+/* Chat Scrollable Container */
+#chat-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 16px 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  scroll-behavior: smooth;
+}
+
+.chat-inner {
+  width: 100%;
+  max-width: 840px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* Empty Hero State */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin: 60px 0 20px;
+  gap: 14px;
+}
+
+.empty-logo {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  box-shadow: 0 10px 30px rgba(59, 130, 246, 0.25);
+}
+
+.empty-title {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #fff;
+}
+
+.empty-subtitle {
+  font-size: 14px;
+  color: var(--fg-muted);
+  max-width: 480px;
+}
+
+.starter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+  width: 100%;
+  margin-top: 16px;
+}
+
+.starter-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--fg);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.starter-card:hover {
+  border-color: #3b82f6;
+  background: #1a233a;
+  transform: translateY(-1px);
+}
+
+.starter-card span {
+  font-size: 11px;
+  color: var(--fg-subtle);
+}
+
+/* Message Rows */
+.msg-row {
+  display: flex;
+  width: 100%;
+  gap: 14px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.msg-row.user {
+  justify-content: flex-end;
+}
+
+.msg-bubble {
+  max-width: 85%;
+  border-radius: 14px;
+  padding: 12px 18px;
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+
+.msg-row.user .msg-bubble {
+  background: #1d3557;
+  color: #fff;
+  border: 1px solid #2b4c7e;
+  border-bottom-right-radius: 4px;
+}
+
+.msg-row.assistant {
+  flex-direction: column;
+  max-width: 100%;
+}
+
+.assistant-body {
+  display: flex;
+  gap: 14px;
+  width: 100%;
+}
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #1e293b;
+  border: 1px solid var(--card-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.assistant-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.assistant-text {
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: #f1f5f9;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.assistant-text h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+  margin: 12px 0 6px;
+}
+
+.assistant-text ul, .assistant-text ol {
+  padding-left: 20px;
+  margin: 8px 0;
+}
+
+.assistant-text li {
+  margin-bottom: 4px;
+}
+
+.assistant-text strong {
+  color: #93c5fd;
+  font-weight: 600;
+}
+
+/* Thinking Accordion (ChatGPT / Grok Style) */
+.thinking-box {
+  background: #0d121c;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 13px;
+  transition: border-color 0.15s;
+}
+
+.thinking-box.active {
+  border-color: #3b82f6;
+}
+
+.thinking-header {
+  padding: 9px 13px;
+  background: #111724;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+}
+
+.thinking-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  color: #a78bfa;
+}
+
+.thinking-time {
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+  font-family: var(--font-mono);
+}
+
+.thinking-chevron {
+  transition: transform 0.2s ease;
+  color: var(--fg-muted);
+}
+
+.thinking-box.collapsed .thinking-chevron {
+  transform: rotate(-90deg);
+}
+
+.thinking-box.collapsed .thinking-body {
+  display: none;
+}
+
+.thinking-body {
+  padding: 10px 14px;
+  border-top: 1px solid #1a2233;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.thinking-step {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 12.5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  padding-bottom: 6px;
+}
+
+.thinking-step:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.step-icon {
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.step-content {
+  flex: 1;
+}
+
+.step-label {
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #60a5fa;
+}
+
+.step-text {
+  color: var(--fg-muted);
+  line-height: 1.45;
+  margin-top: 2px;
+}
+
+.step-thought {
+  margin-top: 3px;
+  font-style: italic;
+  color: #94a3b8;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 4px 8px;
+  border-radius: 4px;
+  border-left: 2px solid #6366f1;
+}
+
+/* Citations & Evidence Block */
+.evidence-section {
+  margin-top: 8px;
+  border: 1px solid var(--card-border);
+  background: #0f1624;
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.evidence-header {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-muted);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.evidence-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.evidence-card {
+  background: #141c2c;
+  border: 1px solid #1e293f;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.evidence-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ref-tag {
+  background: #1e3a8a;
+  color: #93c5fd;
+  font-weight: 600;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+}
+
+.section-tag {
+  background: #16263d;
+  color: #60a5fa;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid #203554;
+}
+
+.evidence-title {
+  font-weight: 500;
+  color: #f8fafc;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evidence-links a {
+  color: #60a5fa;
+  text-decoration: none;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.evidence-links a:hover {
+  text-decoration: underline;
+}
+
+.evidence-excerpt {
+  font-size: 12px;
+  color: var(--fg-subtle);
+  background: rgba(0, 0, 0, 0.25);
+  padding: 6px 8px;
+  border-radius: 4px;
+  line-height: 1.45;
+  border-left: 2px solid #3b82f6;
+  margin-top: 4px;
+}
+
+.msg-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--fg-subtle);
+  margin-top: 4px;
+}
+
+.copy-btn {
+  background: transparent;
+  border: none;
+  color: var(--fg-subtle);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+}
+
+.copy-btn:hover {
+  color: var(--fg);
+}
+
+/* Floating Input Box (ChatGPT / Grok Style) */
+.input-floating-wrapper {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: linear-gradient(180deg, transparent 0%, rgba(9, 13, 22, 0.85) 24%, var(--bg) 100%);
+  pointer-events: none;
+}
+
+.input-box {
+  width: 100%;
+  max-width: 840px;
+  background: var(--input-bg);
+  border: 1px solid #233148;
+  border-radius: 16px;
+  padding: 10px 14px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: auto;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.input-box:focus-within {
+  border-color: #3b82f6;
+  box-shadow: 0 10px 30px -5px rgba(59, 130, 246, 0.15);
+}
+
+.input-textarea {
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 14.5px;
+  line-height: 1.5;
+  resize: none;
+  max-height: 140px;
+  outline: none;
+  font-family: inherit;
+}
+
+.input-textarea::placeholder {
+  color: var(--fg-subtle);
+}
+
+.input-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.input-controls-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.toggle-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  user-select: none;
+  background: #172132;
+  border: 1px solid var(--card-border);
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.15s;
+}
+
+.toggle-pill.active {
+  background: #1e3a8a;
+  border-color: #3b82f6;
+  color: #93c5fd;
+}
+
+.send-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #3b82f6;
+  border: none;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.send-btn:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.send-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.input-caption {
+  font-size: 11px;
+  color: var(--fg-subtle);
+  margin-top: 6px;
+  text-align: center;
+}
+
+/* Modals */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(6px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.modal-overlay.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.modal {
+  width: 90%;
+  max-width: 780px;
+  background: #0f1624;
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+  overflow: hidden;
+}
+
+.modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--card-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.modal-tabs {
+  display: flex;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--card-border);
+  background: #0b101c;
+  gap: 16px;
+}
+
+.modal-tab {
+  padding: 12px 2px;
+  font-size: 13px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+
+.modal-tab:hover {
+  color: var(--fg);
+}
+
+.modal-tab.active {
+  color: #60a5fa;
+  border-bottom-color: #3b82f6;
+  font-weight: 500;
+}
+
+.modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.stat-card {
+  background: #141d2e;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat-label {
+  font-size: 11px;
+  color: var(--fg-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.stat-val {
+  font-size: 20px;
+  font-weight: 700;
+  color: #fff;
+  font-family: var(--font-mono);
+}
+
+.stat-sub {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.form-select, .form-input {
+  background: #141c2c;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 9px 12px;
+  color: #fff;
+  font-size: 13.5px;
+  outline: none;
+}
+
+.form-select:focus, .form-input:focus {
+  border-color: #3b82f6;
+}
+
+.db-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.db-table th {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--card-border);
+  color: var(--fg-subtle);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.db-table td {
+  padding: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: var(--fg);
+}
+
+.table-badge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: #1a2538;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #93c5fd;
+}
+
+.source-badge {
+  font-size: 10px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.source-openalex { background: #1e3a5f; color: #93c5fd; }
+.source-arxiv { background: #4a1525; color: #fca5a5; }
+.source-europepmc { background: #14382c; color: #6ee7b7; }
+.source-catalog { background: #3b2812; color: #fcd34d; }
+
+.modal-footer {
+  padding: 14px 20px;
+  border-top: 1px solid var(--card-border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  background: #0b101c;
+}
+
+.btn-secondary {
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: #1e293b;
+  border: 1px solid var(--card-border);
+  color: var(--fg);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.btn-primary {
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: #3b82f6;
+  border: none;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+/* Animations & Spinners */
+.spin {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid #a78bfa;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+  animation: pulse 1.8s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+.blinking-cursor {
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  background: #3b82f6;
+  margin-left: 2px;
+  vertical-align: -2px;
+  animation: blink 0.8s steps(1) infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+@media (max-width: 768px) {
+  #sidebar {
+    position: absolute;
+    height: 100vh;
+  }
+}
 </style>
 </head>
 <body>
-<aside>
-  <h1>Search Bot</h1>
-  <div class="small">grounded RAG · local model · citations only</div>
-  <button onclick="newChat()" style="background:#1c3457">＋ New chat</button>
-  <div><b class="small">Chat history</b><div id="sessions"></div></div>
-  <hr>
-  <div><b class="small">Corpus</b><div id="searches"></div></div>
-  <div style="display:flex;gap:6px"><input id="newslug" placeholder="new folder" style="flex:1">
-  <button onclick="createSearch()">create</button></div>
-  <div id="jobline" class="small"></div>
-  <div class="lg"><b class="small">Find papers · LibGen · Anna's Archive · PubMed · arXiv</b>
-    <div style="display:flex;gap:6px;margin-top:6px"><input id="lq" placeholder="topic…" style="flex:1">
-    <button onclick="libgenSearch()">go</button></div>
-    <div id="lres"></div>
+<div id="app">
+  <!-- Left Sidebar (Grok / ChatGPT style) -->
+  <aside id="sidebar">
+    <div class="sidebar-header">
+      <div class="brand">
+        <div class="brand-icon">🔬</div>
+        <span>SearchBot</span>
+      </div>
+      <button class="btn-icon" onclick="toggleSidebar()" title="Collapse sidebar">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+    </div>
+
+    <button class="new-chat-btn" onclick="startNewChat()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      <span>New inquiry</span>
+    </button>
+
+    <div class="sidebar-scroll">
+      <!-- Database / Corpora selection -->
+      <div>
+        <div class="sidebar-section-title">
+          <span>Active Literature Corpus</span>
+          <button class="btn-icon" style="padding: 2px 4px;" onclick="openNewFolderPrompt()" title="Add partition">+</button>
+        </div>
+        <div id="corpus-list" class="corpus-list">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+      <!-- Recent Sessions -->
+      <div>
+        <div class="sidebar-section-title">
+          <span>Recent Sessions</span>
+        </div>
+        <div id="sessions-list" class="sessions-list">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="token-pill">
+        <span>Indexed chunks:</span>
+        <b id="sidebar-chunks">0</b>
+      </div>
+      <button class="footer-btn" onclick="openSettingsModal('stats')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+        <span>Database & Storage Info</span>
+      </button>
+      <button class="footer-btn" onclick="openSettingsModal('models')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>Model & Embedder</span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- Main Viewport -->
+  <main id="main">
+    <!-- Top Bar -->
+    <header class="main-header">
+      <div class="header-left">
+        <button class="btn-icon" onclick="toggleSidebar()" title="Toggle sidebar">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <div class="model-pill-switcher" onclick="openSettingsModal('models')">
+          <span class="pulse-dot"></span>
+          <span id="active-model-label">chat server</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <div class="badge-tag" id="active-embed-badge">embedder —</div>
+        <button class="btn-icon" onclick="openCatalogueSearch()" title="Catalogue paper discovery (LibGen, Anna's Archive, arXiv, Crossref, PubMed, Europe PMC)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        </button>
+        <button class="btn-icon" onclick="openSettingsModal('stats')" title="View database storage & re-index">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Embedder Mismatch Alert Banner -->
+    <div id="embed-mismatch-banner" class="mismatch-banner" style="display:none;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span>⚠️</span>
+        <span id="embed-mismatch-text">Embedder Mismatch detected</span>
+      </div>
+      <button class="btn-primary" style="padding:4px 10px; font-size:11.5px; background:#d97706;" onclick="triggerReindex()">
+        ⚡ Auto-Reindex Corpus
+      </button>
+    </div>
+
+    <!-- Chat Scrollable Container -->
+    <div id="chat-container">
+      <div id="chat" class="chat-inner">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+
+    <!-- Floating Prompt Bar (ChatGPT / Grok Style) -->
+    <div class="input-floating-wrapper">
+      <div class="input-box">
+        <textarea
+          id="question-input"
+          class="input-textarea"
+          rows="1"
+          placeholder="Ask a scientific literature question... (hybrid vector + BM25 retrieval, agent fetches what is missing)"
+          onkeydown="handleKeyDown(event)"
+          oninput="autoResize(this)"
+        ></textarea>
+        <div class="input-controls">
+          <div class="input-controls-left">
+            <div id="auto-acquire-toggle" class="toggle-pill active" onclick="toggleAutoAcquire()" title="Let the agent fetch missing literature through the catalogue (LibGen / Anna's Archive)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+              <span>Catalogue acquire</span>
+            </div>
+            <div class="toggle-pill" onclick="openSettingsModal('stats')">
+              <span id="active-corpus-badge">Scope: All Folders</span>
+            </div>
+          </div>
+          <button id="send-btn" class="send-btn" onclick="submitQuestion()" title="Submit question">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="input-caption">Grounded with hybrid vector + BM25 retrieval, fused by reciprocal rank, cited by [E#] block.</div>
+    </div>
+  </main>
+</div>
+
+<!-- Settings & Database Information Modal -->
+<div id="settings-modal" class="modal-overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Settings & Database Management</div>
+      <button class="btn-icon" onclick="closeModal()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-tabs">
+      <div class="modal-tab active" onclick="switchModalTab('stats', this)">Database & Storage</div>
+      <div class="modal-tab" onclick="switchModalTab('models', this)">Model & Embedder</div>
+      <div class="modal-tab" onclick="switchModalTab('catalogue', this)">Catalogue Discovery</div>
+      <div class="modal-tab" onclick="switchModalTab('health', this)">Index Health & Memory</div>
+    </div>
+    <div id="modal-content" class="modal-body">
+      <!-- Injected dynamically -->
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal()">Close</button>
+      <button class="btn-primary" onclick="saveSettings()">Save Preferences</button>
+    </div>
   </div>
-</aside>
-<main>
-  <div id="chat"></div>
-  <div id="bar">
-    <input id="q" placeholder="Ask the literature… (agent will search & fetch if evidence is thin)"
-           onkeydown="if(event.key=='Enter')ask()">
-    <button id="askbtn" onclick="ask()">Ask</button>
-  </div>
-</main>
+</div>
+
 <script>
-let slug = localStorage.getItem('sb_slug') || 'all';
-let session = localStorage.getItem('sb_session') || null;
-const $=id=>document.getElementById(id);
-async function j(u,o){const r=await fetch(u,o);return r.json()}
-function newSessionId(){return 'web-'+Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
+// Application State
+let activeSlug = localStorage.getItem('sb_slug') || 'all';
+let currentSessionId = localStorage.getItem('sb_session') || null;
+let autoAcquireEnabled = true;
+let isGenerating = false;
+let globalStats = null;
+// Mirrors webserver.DEFAULT_SETTINGS; the server is the authority and every
+// load replaces this, so a stale literal here can never invent a setting.
+let currentSettings = {
+  chat_model: '',
+  embed_model: '',
+  topk: 8,
+  temperature: 0.2,
+  acquire: true,
+  recency: 0
+};
 
-const PHASE={
-  start:{ic:'🧠',t:'plan'}, retrieve:{ic:'🔎',t:'hybrid retrieval (vec+BM25+RRF)'},
-  gate:{ic:'🚦',t:'evidence gate'}, acquire_plan:{ic:'🗺️',t:'acquire plan'},
-  acquire_target:{ic:'📁',t:'new topic folder'}, libgen_search:{ic:'🔍',t:'catalogue search'},
-  libgen_results:{ic:'📑',t:'catalogue hits'}, libgen_search_error:{ic:'⚠️',t:'catalogue error'},
-  skip_dup:{ic:'♻️',t:'already in corpus'}, download:{ic:'⬇️',t:'download PDF'},
-  download_done:{ic:'✅',t:'saved'}, download_error:{ic:'❌',t:'download failed'},
-  index:{ic:'📇',t:'chunk + embed + FTS'}, index_done:{ic:'📇',t:'indexed'},
-  merge:{ic:'🧵',t:'per-term evidence merge'}, merge_extra:{ic:'🧵',t:'merge'},
-  prompt:{ic:'🧩',t:'prompt assembly'}, generate:{ic:'⚡',t:'model generating'},
-  delta:{ic:'✍️',t:''}, reset:{ic:'🔄',t:'generation retry'},
-  generate_done:{ic:'✅',t:'generation finished'},
-  memory:{ic:'🗂️',t:'memory'}, done:{ic:'🏁',t:'done'}, error:{ic:'❌',t:'error'}};
-
-function traceBox(){
-  const w=document.createElement('div');w.className='trace';
-  w.innerHTML=`<div class="thead" onclick="this.parentNode.classList.toggle('closed')">
-    <span class="spin"></span><span class="st">working…</span><span class="tm"></span><span class="chev">▾</span>
-  </div><div class="tbody"></div>`;
-  $('chat').appendChild(w);scrolled();return w;
-}
-function addStep(w,ev){
-  // SECURITY: all values interpolated into innerHTML below pass through esc()
-  // (& < > " ' escaped); indices like ev.hits[i] come from our own JSON API.
-  // This UI is served only on 127.0.0.1 by webserver.py.
-  const [st,tm,chev]=w.querySelectorAll('.thead .st,.tm,.chev');
-  const tb=w.querySelector('.tbody');
-  if(ev.phase==='delta'){return}
-  if(ev.phase==='done'){st.textContent='done';tm.textContent=(ev.ms||w._t0?Date.now()-w._t0:0)+'ms · '+ev.count+' steps';
-    w.querySelector('.spin')?.remove();w.classList.add('closed');return;}
-  w._t0=w._t0||Date.now();tm.textContent=(Date.now()-w._t0)+'ms';
-  st.textContent=(PHASE[ev.phase]?.t||ev.phase);
-  const p=PHASE[ev.phase]||{ic:'•'};
-  const d=document.createElement('div');d.className='step';
-  let body=`<div class="lbl ${ev.phase}">${ev.phase}</div>`;
-  body+=`<div class="txt">${esc(ev.msg||'')}</div>`;
-  if(ev.hits&&ev.hits.length)body+='<ul class="hitlist">'+ev.hits.map(h=>
-    `<li><span class="lane ${h.lanes==='vec+fts'?'vf':h.lanes==='vec'?'v':'f'}">${h.lanes}</span><b>${esc(h.title)}</b> <span class="small">${esc(h.year||'')} · ${esc(h.slug)}</span><span class="sc">${h.score}</span></li>`).join('')+'</ul>';
-  if(ev.added&&ev.added.length)body+='<ul class="hitlist">'+ev.added.map(h=>
-    `<li><b>${esc(h.title)}</b> <span class="small">${esc(h.slug)}</span><span class="sc">${h.score}</span></li>`).join('')+'</ul>';
-  d.innerHTML=`<div class="ic">${p.ic}</div><div class="body">${body}</div>`;
-  tb.appendChild(d);tb.scrollTop=1e9;scrolled();
-}
-function scrolled(){const c=$('chat');c.scrollTop=1e9}
-
-/* ---------- streaming answer bubble ---------- */
-function answerBox(){
-  const d=document.createElement('div');d.className='msg assistant';d.textContent='';
-  const car=document.createElement('span');car.className='caret';d.appendChild(car);
-  $('chat').appendChild(d);scrolled();
-  return {el:d,car,text:''};
-}
-function streamTo(box,txt){
-  box.text+=txt;box.el.textContent=box.text;box.el.appendChild(box.car);scrolled();
+const $ = (id) => document.getElementById(id);
+async function api(path, opts = {}) {
+  const resp = await fetch(path, opts);
+  return resp.json();
 }
 
-async function poll(rid,box,w){
-  let since=0,finished=null;
-  while(true){
-    let r;try{r=await j('/api/trace?id='+rid+'&since='+since)}catch(e){await new Promise(s=>setTimeout(s,1500));continue}
-    if(r.error){add('assistant','error: '+r.error);return null}
-    for(const ev of r.events){
-      if(ev.phase==='delta'&&box)streamTo(box,ev.text||'');
-      else if(ev.phase==='reset'&&box){box.text='';box.el.textContent='';box.el.appendChild(box.car);addStep(w,ev);}
-      else addStep(w,ev);
+function generateSessionId() {
+  return 'sess-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+}
+
+function esc(str) {
+  return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// esc() leaves ` and ${ alone, so it is not enough inside an inline handler that
+// embeds a JS template literal: an answer quoting a corpus passage containing a
+// backtick would close the literal and run the rest as code. JSON gives a real
+// string literal; esc then makes it survive the double-quoted attribute.
+function jsAttr(value) {
+  return esc(JSON.stringify(value == null ? '' : String(value)));
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 140) + 'px';
+}
+
+function handleKeyDown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    submitQuestion();
+  }
+}
+
+function toggleSidebar() {
+  $('sidebar').classList.toggle('collapsed');
+}
+
+function toggleAutoAcquire() {
+  autoAcquireEnabled = !autoAcquireEnabled;
+  $('auto-acquire-toggle').classList.toggle('active', autoAcquireEnabled);
+}
+
+// Render empty state
+function renderEmptyState() {
+  const chat = $('chat');
+  chat.innerHTML = `
+    <div class="empty-state">
+      <div class="empty-logo">🧬</div>
+      <h2 class="empty-title">Grounded Scientific Literature Search</h2>
+      <p class="empty-subtitle">Ask a scientific, medical or technical question. The agent retrieves from your indexed PDFs, gates whether the evidence actually covers the terms, fetches missing literature through the catalogue, and answers with bracketed citations [E1].</p>
+      
+      <div class="starter-grid">
+        <div class="starter-card" onclick="useStarter('What are the molecular differences between PD-1 and CTLA-4 checkpoint blockade?')">
+          <b>PD-1 vs CTLA-4 Checkpoints</b>
+          <span>Anatomical locus, CD28 costimulation & TME exhaustion</span>
+        </div>
+        <div class="starter-card" onclick="useStarter('How does the glymphatic system clear amyloid-beta during slow-wave sleep?')">
+          <b>Glymphatic Sleep Clearance</b>
+          <span>Astrocytic AQP4 channels & interstitial space expansion</span>
+        </div>
+        <div class="starter-card" onclick="useStarter('Compare Prime Editing vs Base Editing in mammalian genome fidelity')">
+          <b>Prime Editing vs Base Editing</b>
+          <span>Reverse transcriptase, pegRNA & off-target indels</span>
+        </div>
+        <div class="starter-card" onclick="useStarter('What are the mechanisms of senolytics and mTOR inhibition in longevity?')">
+          <b>Senolytics & mTOR Longevity</b>
+          <span>p16Ink4a clearance, SASP translation & healthspan</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function useStarter(text) {
+  $('question-input').value = text;
+  autoResize($('question-input'));
+  submitQuestion();
+}
+
+// Start New Chat
+function startNewChat() {
+  currentSessionId = generateSessionId();
+  localStorage.setItem('sb_session', currentSessionId);
+  renderEmptyState();
+  loadSessions();
+  $('question-input').focus();
+}
+
+// Check and display embedder mismatch banner
+function embedderMismatchText(e) {
+  if (!e) return '';
+  const shown = (m) => (!m || m === 'unknown') ? 'unnamed model' : m;
+  if (e.dim_mismatch) {
+    return `Vectors were built at <b>${e.indexed_dim}d</b> (${shown(e.indexed_model)}), `
+         + `but the active embedder returns <b>${e.active_dim}d</b> (${shown(e.active_model)}). `
+         + `Re-index to rebuild them against the current model.`;
+  }
+  if (e.model_mismatch) {
+    return `Vectors were built with <b>${shown(e.indexed_model)}</b>, the active embedder is `
+         + `<b>${shown(e.active_model)}</b>. Retrieval still works, but the two are not comparable.`;
+  }
+  if (e.chunks_missing_vectors) {
+    return `<b>${e.chunks_missing_vectors.toLocaleString()}</b> chunk(s) have no vector yet `
+         + `(the index was interrupted, or a re-embed failed).`;
+  }
+  return '';
+}
+
+async function checkAndDisplayMismatch() {
+  try {
+    const stats = await api('/api/stats');
+    globalStats = stats;
+    $('sidebar-chunks').textContent = (stats.total_chunks || 0).toLocaleString();
+    const banner = $('embed-mismatch-banner');
+    const msg = embedderMismatchText(stats.embedder);
+    if (msg) {
+      $('embed-mismatch-text').innerHTML = msg;
+      banner.style.display = 'flex';
+    } else {
+      banner.style.display = 'none';
     }
-    since=r.next;
-    if(r.done){finished=r.result;break}
-    await new Promise(s=>setTimeout(s,120));
+  } catch (e) {}
+}
+
+async function pollJob(jobId, label) {
+  // Re-embedding runs in a server thread and can outlive a page view, so the
+  // banner keeps the number rather than pretending the wait finished instantly.
+  for (let i = 0; i < 600; i++) {
+    await new Promise(r => setTimeout(r, 1000));
+    const jobs = await api('/api/status');
+    const job = (jobs || []).find(j => j.id === jobId);
+    if (!job) continue;
+    if (label) label.textContent = `${job.state}: ${job.info || ''}`;
+    if (job.state === 'done' || job.state === 'error') return job;
   }
-  return finished;
+  return null;
 }
 
-async function ask(){
-  const q=$('q').value.trim();if(!q)return;
-  if(!session){session=newSessionId();localStorage.setItem('sb_session',session);refreshSessions()}
-  $('q').value='';$('askbtn').disabled=true;
-  add('user',q);
-  const w=traceBox();
-  const box=answerBox();
-  let rid;
-  try{rid=(await j('/api/ask',{method:'POST',body:JSON.stringify({slug:slug=='all'?null:slug,question:q,session_id:session})})).run_id}
-  catch(e){w.remove();box.el.remove();add('assistant','error: '+e);$('askbtn').disabled=false;return}
-  const r=await poll(rid,box,w);
-  if(!r){w.remove();box.el.remove();$('askbtn').disabled=false;return}
-  box.car.remove();
-  if(r.error){box.el.textContent='⚠️ '+r.error}
-  else if(!(r.answer||'').trim()){box.el.textContent='(model returned nothing — try rephrasing)'}
-  else box.el.textContent=r.answer;
-  if(r.evidence&&r.evidence.length)sourcesBlock(r.evidence);
-  const acq=(r.rounds||[]).reduce((a,x)=>a+(x.acquired||0),0);
-  if(acq)add('sysline',`📥 ${acq} new paper(s) acquired & indexed into the corpus`);
-  refresh();refreshSessions();
-  $('askbtn').disabled=false;$('q').focus();
-}
-
-function sourcesBlock(refs){
-  const ev=document.createElement('div');ev.className='ev';
-  ev.innerHTML='<b>Sources</b>'+refs.map((e,i)=>{
-    const ident=e.pmcid||e.doi||'';
-    const link=e.pmcid?`<a href="https://www.ncbi.nlm.nih.gov/pmc/articles/${esc(e.pmcid)}/" target="_blank">PMC</a>`
-      :e.doi?`<a href="https://doi.org/${esc(e.doi)}" target="_blank">DOI</a>`:'';
-    return `<div class="row">[E${i+1}] <b>${esc(e.title||e.file)}</b> <span class="small">${esc(e.year||'')} ${esc(e.journal||'')} ${esc(ident)}</span> ${link} <span class="badge">${esc(e.slug)}</span></div>`}).join('');
-  $('chat').appendChild(ev);scrolled();
-}
-function add(cls,txt){
-  const d=document.createElement('div');d.className=(cls=='sysline'?'sysline':'msg '+cls);
-  d.textContent=txt;$('chat').appendChild(d);scrolled();return d;
-}
-
-/* ---------- sessions / corpus ---------- */
-async function refreshSessions(){
-  const rows=await j('/api/sessions');
-  $('sessions').innerHTML=rows.map(s=>`<div class="sess ${s.id==session?'on':''}" onclick="openSession('${esc(s.id)}','${esc(s.slug||'')}')" title="${esc(s.id)}">${esc(s.title||(s.slug||'?'))} <span class="small">${s.turns}t · ${esc(s.slug||'all')}</span></div>`).join('')||'<div class="small">no chats yet</div>';
-}
-async function openSession(id,s){
-  session=id;localStorage.setItem('sb_session',id);
-  if(s&&s!=='all'){slug=s;localStorage.setItem('sb_slug',s)}
-  $('chat').innerHTML='';
-  const hist=await j('/api/history?session='+encodeURIComponent(id));
-  for(const t of hist){
-    if(t.role==='user')add('user',t.text);
-    else{add('assistant',t.text);
-      let refs=[];try{refs=JSON.parse(t.refs_json||'[]')}catch(e){}
-      if(refs.length)sourcesBlock(refs);}
+async function triggerReindex() {
+  const banner = $('embed-mismatch-banner');
+  const text = $('embed-mismatch-text');
+  banner.style.display = 'flex';
+  text.innerHTML = 'Re-embedding stored chunks with the active embedder…';
+  try {
+    const res = await api('/api/reindex', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug: activeSlug === 'all' ? null : activeSlug })
+    });
+    if (res.error) throw new Error(res.error);
+    const job = await pollJob(res.job, text);
+    if (!job) throw new Error('still running — reload to watch it');
+    if (job.state === 'error') throw new Error(job.info || 're-index failed');
+    const out = JSON.parse(job.info || '{}');
+    text.innerHTML = `Re-indexed <b>${out.chunks || 0}</b> chunk(s) across <b>${out.docs || 0}</b> `
+                   + `document(s) at <b>${out.dim}d</b> with ${out.model || 'the active embedder'}.`;
+    setTimeout(checkAndDisplayMismatch, 4000);
+    await loadCorpora();
+  } catch (err) {
+    text.innerHTML = `Re-indexing failed: ${esc(String(err))}`;
   }
-  if(!hist.length)add('sysline','empty chat');
-  refresh();refreshSessions();
 }
-function newChat(){session=newSessionId();localStorage.setItem('sb_session',session);$('chat').innerHTML='';
-  add('sysline','new chat — scope: '+(slug=='all'?'ALL folders (every source)':slug));refreshSessions()}
-async function refresh(){
-  const rows=await j('/api/searches');
-  $('searches').innerHTML=
-    `<div class="sr ${slug=='all'?'on':''}" onclick="pick('all')"><span>🌐 all folders</span></div>`+
-    rows.map(r=>`<div class="sr ${r.slug==slug?'on':''}" onclick="pick('${esc(r.slug)}')"><span>${esc(r.slug)} <span class="small">· ${r.docs}d/${r.chunks}c</span></span></div>`).join('');
-  const jobs=await j('/api/status'+(slug&&slug!='all'?'?slug='+slug:''));
-  const jb=jobs[0];
-  $('jobline').innerHTML=jb?`job: <b class="${jb.state=='error'?'pending':''}">${jb.state}</b> ${esc((jb.info||'').slice(0,80))}`:'';
-  if(jb&&['queued','running','indexing'].includes(jb.state))setTimeout(refresh,3000);
-}
-function pick(s){slug=s;localStorage.setItem('sb_slug',s);refresh();
-  add('sysline',s=='all'?'scope: all indexed folders — every relevant source is retrieved':'scope: “'+s+'” only')}
-async function createSearch(){
-  const s=$('newslug').value.trim();if(!s)return;
-  await j('/api/searches',{method:'POST',body:JSON.stringify({slug:s})});
-  slug=s;$('newslug').value='';localStorage.setItem('sb_slug',s);refresh();
-  add('sysline',`created search/${s} — drop PDFs into search/${s}/pdf/, it indexes automatically`);
-}
-async function libgenSearch(){
-  const q=$('lq').value.trim();if(!q)return;
-  $('lres').innerHTML='<div class="small pending">catalogue search…</div>';
-  const r=await j('/api/libgen/search',{method:'POST',body:JSON.stringify({query:q,limit:8})});
-  const items=r.results||[];
-  if(!items.length){$('lres').innerHTML=`<div class="small">${esc(JSON.stringify(r).slice(0,160))}</div>`;return}
-  window._litems=items;
-  $('lres').innerHTML=items.map((it,i)=>`<div class="r">${esc((it.title||'').slice(0,84))}<br>
-    <span class="small">${esc(it.year||'')} · ${esc(it.md5?it.md5.slice(0,10)+'…':'')}</span>
-    ${it.md5?`<button onclick="bringTo(${i})">bring${slug!='all'?' → '+esc(slug):''}</button>`:''}</div>`).join('');
-}
-async function bringTo(i){
-  const it=window._litems[i];
-  const target=slug!='all'?slug:((it.title||'general').split(' ')[0].toLowerCase().replace(/[^a-z0-9-]/g,'').slice(0,20)||'general');
-  await j('/api/libgen/get',{method:'POST',body:JSON.stringify({slug:target,md5:it.md5})});
-  add('sysline','⬇️ downloading into '+target+'/pdf — indexing in background');refresh();
-}
-function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
 
-if(!session){session=newSessionId();localStorage.setItem('sb_session',session)}
-add('sysline','default scope: ALL folders — every indexed source relevant to the question is used. Pick a folder in the sidebar to restrict.');
-refreshSessions().then(()=>refresh());
-setInterval(refreshSessions,20000);
+// Load Corpora (Databases)
+async function loadCorpora() {
+  try {
+    const list = await api('/api/searches');
+    const container = $('corpus-list');
+    
+    let html = `
+      <div class="corpus-item ${activeSlug === 'all' ? 'active' : ''}" onclick="selectCorpus('all')">
+        <div class="item-left">
+          <span>🌐</span>
+          <span class="item-title">All Folders</span>
+        </div>
+        <span class="item-meta">Full Index</span>
+      </div>
+    `;
+
+    list.forEach(c => {
+      const isSelected = activeSlug === c.slug;
+      html += `
+        <div class="corpus-item ${isSelected ? 'active' : ''}" onclick="selectCorpus(${jsAttr(c.slug)})">
+          <div class="item-left">
+            <span>📁</span>
+            <span class="item-title" title="${esc(c.title || c.slug)}">${esc(c.slug)}</span>
+          </div>
+          <span class="item-meta">${c.docs}d · ${c.chunks}c</span>
+        </div>
+      `;
+    });
+
+    container.innerHTML = html;
+    $('active-corpus-badge').textContent = `Scope: ${activeSlug === 'all' ? 'All Folders' : activeSlug}`;
+  } catch (e) {
+    console.error('Failed to load corpora:', e);
+  }
+}
+
+function selectCorpus(slug) {
+  activeSlug = slug;
+  localStorage.setItem('sb_slug', slug);
+  loadCorpora();
+}
+
+async function openNewFolderPrompt() {
+  const name = prompt('Enter a new corpus topic / folder name (e.g. neurobiology, mRNA-vaccines):');
+  if (!name || !name.trim()) return;
+  await api('/api/searches', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug: name.trim(), title: name.trim() })
+  });
+  activeSlug = name.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  localStorage.setItem('sb_slug', activeSlug);
+  loadCorpora();
+}
+
+// Load Chat Sessions
+async function loadSessions() {
+  try {
+    const sessions = await api('/api/sessions');
+    const container = $('sessions-list');
+
+    if (!sessions.length) {
+      container.innerHTML = '<div style="font-size:12px; color:var(--fg-subtle); padding:6px 10px;">No chats yet</div>';
+      return;
+    }
+
+    container.innerHTML = sessions.map(s => {
+      const isSelected = s.id === currentSessionId;
+      return `
+        <div class="session-item ${isSelected ? 'active' : ''}" onclick="openSession(${jsAttr(s.id)})">
+          <div class="item-left">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span class="item-title" title="${esc(s.title)}">${esc(s.title || 'Untitled inquiry')}</span>
+          </div>
+          <span class="item-meta">${s.turns} turns</span>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    console.error('Failed to load sessions:', e);
+  }
+}
+
+// Open existing chat session
+async function openSession(id) {
+  currentSessionId = id;
+  localStorage.setItem('sb_session', id);
+  loadSessions();
+  
+  const chat = $('chat');
+  chat.innerHTML = '';
+  
+  const history = await api('/api/history?session=' + encodeURIComponent(id));
+  if (!history.length) {
+    renderEmptyState();
+    return;
+  }
+
+  history.forEach(turn => {
+    if (turn.role === 'user') {
+      appendUserMessage(turn.text);
+    } else {
+      let refs = [];
+      try { refs = JSON.parse(turn.refs_json || '[]'); } catch (e) {}
+      appendAssistantMessage({ text: turn.text, evidence: refs });
+    }
+  });
+  scrollBottom();
+}
+
+function appendUserMessage(text) {
+  const chat = $('chat');
+  const row = document.createElement('div');
+  row.className = 'msg-row user';
+  row.innerHTML = `<div class="msg-bubble">${esc(text)}</div>`;
+  chat.appendChild(row);
+  scrollBottom();
+}
+
+// Evidence cards. Keys come from agent._answer_with refs: tag, title, year,
+// journal, pmcid, doi, file, slug, excerpt.
+function evidenceHtml(refs) {
+  if (!refs || !refs.length) return '';
+  const link = (e) => e.pmcid
+    ? `<a href="https://www.ncbi.nlm.nih.gov/pmc/articles/${esc(e.pmcid)}/" target="_blank" rel="noopener">PMC: ${esc(e.pmcid)}</a>`
+    : e.doi
+    ? `<a href="https://doi.org/${esc(e.doi)}" target="_blank" rel="noopener">DOI: ${esc(e.doi)}</a>`
+    : '';
+  return `
+    <div class="evidence-section">
+      <div class="evidence-header">
+        <span>Cited Evidence (${refs.length})</span>
+        <span>Hybrid vector + BM25, RRF-fused</span>
+      </div>
+      <div class="evidence-grid">
+        ${refs.map((e) => `
+          <div class="evidence-card">
+            <div class="evidence-top">
+              <span class="ref-tag">[${esc(e.tag || 'E?')}]</span>
+              <span class="evidence-title" title="${esc(e.title)}">${esc(e.title || e.file || 'untitled')}</span>
+              <div class="evidence-links">${link(e)}</div>
+            </div>
+            <div style="font-size:11.5px; color:var(--fg-subtle);">
+              ${esc(e.journal || '')}${e.journal && e.year ? ' · ' : ''}${esc(e.year || '')} · <code>${esc(e.slug || '')}</code>
+            </div>
+            ${e.excerpt ? `<div class="evidence-excerpt">${esc(e.excerpt)}…</div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function appendAssistantMessage(data) {
+  const chat = $('chat');
+  const row = document.createElement('div');
+  row.className = 'msg-row assistant';
+
+  row.innerHTML = `
+    <div class="assistant-body">
+      <div class="avatar">⚡</div>
+      <div class="assistant-content">
+        <div class="assistant-text">${formatMarkdown(data.text)}</div>
+        ${evidenceHtml(data.evidence)}
+        <div class="msg-footer">
+          <span>${(data.evidence || []).length} evidence block(s)</span>
+          <span>·</span>
+          <button class="copy-btn" onclick="copyText(this, ${jsAttr(data.text)})">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <span>Copy</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  chat.appendChild(row);
+  scrollBottom();
+}
+
+function formatMarkdown(text) {
+  if (!text) return '';
+  let out = esc(text);
+  out = out.replace(/### (.*?)\n/g, '<h3>$1</h3>');
+  out = out.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  out = out.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  out = out.replace(/\[E(\d+)\]/g, '<span class="ref-tag" style="display:inline-block; font-size:11px; margin:0 2px;">[E$1]</span>');
+  return out;
+}
+
+function copyText(btn, str) {
+  navigator.clipboard.writeText(str);
+  const span = btn.querySelector('span');
+  if (span) {
+    const orig = span.textContent;
+    span.textContent = 'Copied!';
+    setTimeout(() => span.textContent = orig, 1500);
+  }
+}
+
+function scrollBottom() {
+  const c = $('chat-container');
+  c.scrollTop = c.scrollHeight + 1000;
+}
+
+// Submit Question & Stream Interactive Thinking
+async function submitQuestion() {
+  const input = $('question-input');
+  const question = input.value.trim();
+  if (!question || isGenerating) return;
+
+  if (!currentSessionId) {
+    currentSessionId = generateSessionId();
+    localStorage.setItem('sb_session', currentSessionId);
+  }
+
+  isGenerating = true;
+  $('send-btn').disabled = true;
+  input.value = '';
+  autoResize(input);
+
+  if ($('chat').querySelector('.empty-state')) {
+    $('chat').innerHTML = '';
+  }
+
+  appendUserMessage(question);
+
+  // Prepare Interactive Thinking Block and Assistant Container
+  const chat = $('chat');
+  const assistantRow = document.createElement('div');
+  assistantRow.className = 'msg-row assistant';
+  
+  assistantRow.innerHTML = `
+    <div class="assistant-body">
+      <div class="avatar">⚡</div>
+      <div class="assistant-content">
+        <!-- Interactive Thinking Accordion -->
+        <div id="active-thinking" class="thinking-box active">
+          <div class="thinking-header" onclick="this.parentNode.classList.toggle('collapsed')">
+            <div class="thinking-title">
+              <span class="spin"></span>
+              <span class="thinking-status">Thinking & Searching Literature...</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="thinking-time">0.0s</span>
+              <svg class="thinking-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            </div>
+          </div>
+          <div class="thinking-body"></div>
+        </div>
+
+        <!-- Streaming Answer Text -->
+        <div id="active-answer" class="assistant-text">
+          <span class="blinking-cursor"></span>
+        </div>
+      </div>
+    </div>
+  `;
+  chat.appendChild(assistantRow);
+  scrollBottom();
+
+  const thinkingBox = assistantRow.querySelector('#active-thinking');
+  const thinkingStatus = assistantRow.querySelector('.thinking-status');
+  const thinkingTime = assistantRow.querySelector('.thinking-time');
+  const thinkingBody = assistantRow.querySelector('.thinking-body');
+  const answerEl = assistantRow.querySelector('#active-answer');
+
+  const startTime = Date.now();
+  const timer = setInterval(() => {
+    thinkingTime.textContent = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+  }, 100);
+
+  let runId = null;
+  try {
+    const postRes = await api('/api/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        slug: activeSlug === 'all' ? null : activeSlug,
+        question,
+        session_id: currentSessionId,
+        acquire: autoAcquireEnabled,
+        topk: currentSettings.topk,
+        temperature: currentSettings.temperature
+      })
+    });
+    runId = postRes.run_id;
+  } catch (err) {
+    clearInterval(timer);
+    isGenerating = false;
+    $('send-btn').disabled = false;
+    answerEl.innerHTML = `<span style="color:var(--danger)">Error initiating request: ${esc(err)}</span>`;
+    return;
+  }
+
+  // Poll Trace
+  let since = 0;
+  let streamedText = '';
+  let finalResult = null;
+
+  const phaseMeta = {
+    start: { icon: '🧠', label: 'Question received' },
+    retrieve: { icon: '🔎', label: 'Hybrid retrieval (vector + BM25)' },
+    gate: { icon: '🚦', label: 'Evidence sufficiency gate' },
+    acquire_plan: { icon: '🗺️', label: 'Acquisition plan' },
+    acquire_target: { icon: '🎯', label: 'Target chosen' },
+    libgen_search: { icon: '🔍', label: 'Catalogue search' },
+    libgen_results: { icon: '📑', label: 'Catalogue matches' },
+    libgen_search_error: { icon: '⚠️', label: 'Catalogue search failed' },
+    download: { icon: '⬇️', label: 'Downloading paper' },
+    download_done: { icon: '✅', label: 'Paper saved' },
+    download_error: { icon: '⚠️', label: 'Download failed' },
+    skip_dup: { icon: '⏭️', label: 'Already in corpus' },
+    index: { icon: '📇', label: 'Chunking and embedding' },
+    index_done: { icon: '📇', label: 'Index updated' },
+    merge: { icon: '🧵', label: 'Rank fusion' },
+    merge_extra: { icon: '🧵', label: 'Rank fusion (widened terms)' },
+    prompt: { icon: '🧩', label: 'Prompt construction' },
+    generate: { icon: '⚡', label: 'Composing the answer' },
+    generate_done: { icon: '🏁', label: 'Answer composed' },
+    memory: { icon: '🧠', label: 'Session memory' },
+    reset: { icon: '🔁', label: 'Retrying generation' },
+    error: { icon: '❌', label: 'Error' }
+  };
+
+  while (true) {
+    let r;
+    try {
+      r = await api(`/api/trace?id=${runId}&since=${since}`);
+    } catch (e) {
+      await new Promise(res => setTimeout(res, 800));
+      continue;
+    }
+
+    if (r.events && r.events.length) {
+      for (const ev of r.events) {
+        if (ev.phase === 'delta') {
+          streamedText += ev.text || '';
+          answerEl.innerHTML = formatMarkdown(streamedText) + '<span class="blinking-cursor"></span>';
+          scrollBottom();
+        } else if (ev.phase === 'done') {
+          finalResult = r.result;
+        } else {
+          const meta = phaseMeta[ev.phase] || { icon: '•', label: ev.phase };
+          thinkingStatus.textContent = meta.label;
+          
+          const stepDiv = document.createElement('div');
+          stepDiv.className = 'thinking-step';
+          const hits = Array.isArray(ev.hits) ? ev.hits : null;
+          stepDiv.innerHTML = `
+            <div class="step-icon">${meta.icon}</div>
+            <div class="step-content">
+              <div class="step-label">${meta.label}</div>
+              <div class="step-text">${esc(ev.msg || '')}</div>
+              ${hits ? `<div class="step-thought">${hits.map(h => esc(`${h.title} (${h.year || 'n.d.'}, ${h.lanes})`)).join('<br>')}</div>` : ''}
+            </div>
+          `;
+          thinkingBody.appendChild(stepDiv);
+          thinkingBody.scrollTop = thinkingBody.scrollHeight;
+        }
+      }
+      since = r.next;
+    }
+
+    if (r.done) {
+      finalResult = r.result;
+      break;
+    }
+    await new Promise(res => setTimeout(res, 100));
+  }
+
+  clearInterval(timer);
+  isGenerating = false;
+  $('send-btn').disabled = false;
+
+  thinkingBox.classList.remove('active');
+  const spin = thinkingBox.querySelector('.spin');
+  if (spin) spin.remove();
+  thinkingStatus.textContent = `Thought process & scientific literature search completed`;
+  thinkingTime.textContent = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+
+  thinkingBox.classList.add('collapsed');
+
+  const cursor = answerEl.querySelector('.blinking-cursor');
+  if (cursor) cursor.remove();
+
+  if (finalResult && finalResult.error) {
+    answerEl.innerHTML = `<span style="color:var(--danger)">${esc(finalResult.error)}</span>`;
+  } else if (finalResult && finalResult.answer) {
+    answerEl.innerHTML = formatMarkdown(finalResult.answer);
+  }
+
+  // Append evidence blocks and footer
+  if (finalResult && finalResult.evidence && finalResult.evidence.length) {
+    const holder = document.createElement('div');
+    holder.innerHTML = evidenceHtml(finalResult.evidence);
+    assistantRow.querySelector('.assistant-content').appendChild(holder.firstElementChild);
+  }
+
+  const footer = document.createElement('div');
+  footer.className = 'msg-footer';
+  footer.innerHTML = `
+    <span>${(finalResult?.evidence || []).length} evidence block(s)</span>
+    ${finalResult?.rounds?.length ? `<span>·</span><span>${finalResult.rounds.length} retrieval round(s)</span>` : ''}
+    <span>·</span>
+    <button class="copy-btn" onclick="copyText(this, ${jsAttr(finalResult?.answer || streamedText)})">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      <span>Copy</span>
+    </button>
+  `;
+  assistantRow.querySelector('.assistant-content').appendChild(footer);
+
+  scrollBottom();
+  loadSessions();
+  loadCorpora();
+  checkAndDisplayMismatch();
+}
+
+// Modal & Settings Handling
+async function openSettingsModal(tab = 'stats') {
+  $('settings-modal').classList.add('open');
+  const tabs = document.querySelectorAll('.modal-tab');
+  tabs.forEach(t => t.classList.remove('active'));
+  
+  const targetTab = Array.from(tabs).find(t => t.getAttribute('onclick')?.includes(tab)) || tabs[0];
+  targetTab.classList.add('active');
+  
+  await renderModalTabContent(tab);
+}
+
+function closeModal() {
+  $('settings-modal').classList.remove('open');
+}
+
+function switchModalTab(tab, el) {
+  document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  renderModalTabContent(tab);
+}
+
+function humanBytes(n) {
+  n = Number(n || 0);
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return `${i === 0 ? n.toFixed(0) : n.toFixed(1)} ${units[i]}`;
+}
+
+async function renderModalTabContent(tab) {
+  const container = $('modal-content');
+  container.innerHTML = '<div style="text-align:center; padding:30px;"><span class="spin"></span> Loading...</div>';
+
+  try {
+    const stats = await api('/api/stats');
+    globalStats = stats;
+    currentSettings = stats.settings;
+    const e = stats.embedder;
+
+    if (tab === 'stats') {
+      container.innerHTML = `
+        <div class="stats-grid">
+          <div class="stat-card">
+            <span class="stat-label">Corpus Folders</span>
+            <span class="stat-val">${stats.total_folders}</span>
+            <span class="stat-sub">under search/</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Indexed Papers</span>
+            <span class="stat-val">${stats.total_docs}</span>
+            <span class="stat-sub">docs rows</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Chunks</span>
+            <span class="stat-val">${stats.total_chunks.toLocaleString()}</span>
+            <span class="stat-sub">${stats.vector_dimension || '—'}d vectors</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Text + Vector Volume</span>
+            <span class="stat-val">${stats.formatted_size}</span>
+            <span class="stat-sub">${stats.total_bytes.toLocaleString()} bytes counted</span>
+          </div>
+        </div>
+
+        ${embedderSummaryHtml(e)}
+
+        <div>
+          <div class="sidebar-section-title" style="margin-bottom:10px;">Corpus Folders</div>
+          <table class="db-table">
+            <thead>
+              <tr><th>Slug</th><th>Docs</th><th>Chunks</th><th>Volume</th><th>Action</th></tr>
+            </thead>
+            <tbody>
+              ${stats.folders.map(f => `
+                <tr>
+                  <td><b>${esc(f.slug)}</b></td>
+                  <td>${f.docs}</td>
+                  <td>${f.chunks}</td>
+                  <td><span class="table-badge">${esc(humanBytes(f.bytes))}</span></td>
+                  <td>
+                    <button class="btn-secondary" style="padding:3px 8px; font-size:11px;" onclick="deleteCorpus(${jsAttr(f.slug)})">Forget</button>
+                  </td>
+                </tr>
+              `).join('') || '<tr><td colspan="5" style="color:var(--fg-subtle)">No folders yet — drop PDFs into search/&lt;slug&gt;/ and create one.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+
+        <div style="background:#141d2e; padding:14px; border-radius:10px; border:1px solid var(--card-border);">
+          <div style="font-weight:600; font-size:13.5px; margin-bottom:8px;">Create New Folder</div>
+          <div style="display:flex; gap:8px;">
+            <input id="new-partition-input" class="form-input" style="flex:1;" placeholder="New corpus slug (e.g. neuro-immunology)">
+            <button class="btn-primary" onclick="createNewPartitionFromModal()">Create & Index</button>
+          </div>
+          <div style="font-size:11.5px; color:var(--fg-subtle); margin-top:6px;">
+            Indexing runs in the background over the PDFs/XML already in search/&lt;slug&gt;/.
+          </div>
+        </div>
+      `;
+    } else if (tab === 'models') {
+      container.innerHTML = `
+        <div class="form-group">
+          <label class="form-label">Chat model (answers)</label>
+          <select id="setting-chat-model" class="form-select">
+            <option value="">Auto-detect from server</option>
+            ${stats.models.chat.map(m => `
+              <option value="${esc(m.id)}" ${currentSettings.chat_model === m.id ? 'selected' : ''}>${esc(m.id)}</option>
+            `).join('')}
+          </select>
+          <div style="font-size:11.5px; color:var(--fg-subtle); margin-top:4px;">
+            Currently used: <b>${esc(stats.models.active_chat)}</b> · from ${esc(stats.servers.chat_url)}
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Embedding model (vectors)</label>
+          <select id="setting-embed-model" class="form-select">
+            <option value="">Server default (single model)</option>
+            ${stats.models.embed.map(m => `
+              <option value="${esc(m.id)}" ${currentSettings.embed_model === m.id ? 'selected' : ''}>
+                ${esc(m.id)}${m.dim ? ` · ${m.dim}d` : ''}
+              </option>
+            `).join('')}
+          </select>
+          <div style="font-size:11.5px; color:var(--fg-subtle); margin-top:4px;">
+            Switching embedders leaves the stored vectors on the old model: re-index afterwards.
+            A width change is detected and the index is rebuilt at the new dimension.
+          </div>
+        </div>
+
+        <div class="form-group" style="background:#141d2e; padding:12px; border-radius:8px; border:1px solid var(--card-border);">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="checkbox" id="setting-acquire" ${currentSettings.acquire ? 'checked' : ''}>
+            <span class="form-label" style="margin-bottom:0;">Let the agent acquire missing literature from the catalogue</span>
+          </label>
+          <span style="font-size:12px; color:var(--fg-subtle); margin-left:22px; display:block; margin-top:4px;">
+            When the evidence gate finds gaps, search the catalogue (LibGen, Anna's Archive, arXiv, Crossref, PubMed, Europe PMC), download and index what fits.
+          </span>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+          <div class="form-group">
+            <label class="form-label">Evidence blocks in the prompt: <span id="topk-val">${currentSettings.topk}</span></label>
+            <input type="range" min="3" max="15" value="${currentSettings.topk}" oninput="$('topk-val').textContent=this.value" id="setting-topk">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Sampling temperature: <span id="temp-val">${currentSettings.temperature}</span></label>
+            <input type="range" min="0" max="1" step="0.05" value="${currentSettings.temperature}" oninput="$('temp-val').textContent=this.value" id="setting-temp">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Recency weighting: <span id="rec-val">${currentSettings.recency}</span></label>
+          <input type="range" min="0" max="0.5" step="0.01" value="${currentSettings.recency}" oninput="$('rec-val').textContent=this.value" id="setting-recency">
+          <div style="font-size:11.5px; color:var(--fg-subtle); margin-top:4px;">
+            Multiplies RRF by <code>1 + w·0.5^(age/10y)</code>. Measured to help around 0.05; above ~0.2 it trades relevance for novelty. 0 disables it.
+          </div>
+        </div>
+      `;
+    } else if (tab === 'catalogue') {
+      container.innerHTML = `
+        <div class="form-group">
+          <label class="form-label">Catalogue paper discovery (through bin/libgen-mcp)</label>
+          <div style="display:flex; gap:8px;">
+            <input id="cat-search-input" class="form-input" style="flex:1;" placeholder="Search the catalogue by title words (e.g. prime editing base editor)..." onkeydown="if(event.key==='Enter')executeCatalogueSearch()">
+            <button class="btn-primary" onclick="executeCatalogueSearch()">Search Papers</button>
+          </div>
+        </div>
+        <div id="cat-results-container" style="display:flex; flex-direction:column; gap:10px; min-height:120px;">
+          <div style="font-size:12.5px; color:var(--fg-subtle); text-align:center; padding:30px;">Catalogue search matches titles, so use topic words rather than a question.</div>
+        </div>
+      `;
+    } else if (tab === 'health') {
+      container.innerHTML = `
+        <div class="stats-grid">
+          <div class="stat-card">
+            <span class="stat-label">Sessions</span>
+            <span class="stat-val">${stats.memory.sessions}</span>
+            <span class="stat-sub">chat threads</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Turns stored</span>
+            <span class="stat-val">${stats.memory.turns}</span>
+            <span class="stat-sub">re-injected as memory</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Durable facts</span>
+            <span class="stat-val">${stats.memory.facts}</span>
+            <span class="stat-sub">extracted per answer</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Chunks without vectors</span>
+            <span class="stat-val">${e.chunks_missing_vectors}</span>
+            <span class="stat-sub">should be 0</span>
+          </div>
+        </div>
+
+        ${embedderSummaryHtml(e)}
+
+        <div>
+          <div class="sidebar-section-title" style="margin-bottom:10px;">Recent index jobs</div>
+          <table class="db-table">
+            <thead><tr><th>#</th><th>Slug</th><th>Kind</th><th>State</th><th>Info</th></tr></thead>
+            <tbody>
+              ${stats.jobs.map(j => `
+                <tr>
+                  <td>${j.id}</td>
+                  <td>${esc(j.slug)}</td>
+                  <td>${esc(j.kind)}</td>
+                  <td><span class="table-badge">${esc(j.state)}</span></td>
+                  <td style="font-size:11.5px; color:var(--fg-muted);">${esc(String(j.info || '').slice(0, 90))}</td>
+                </tr>
+              `).join('') || '<tr><td colspan="5" style="color:var(--fg-subtle)">No jobs yet.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+
+        <div style="background:#141d2e; border:1px solid var(--card-border); padding:14px; border-radius:10px;">
+          <div style="font-weight:600; font-size:13.5px; margin-bottom:8px;">How retrieval actually works here</div>
+          <div style="font-size:12.5px; color:var(--fg-muted); line-height:1.6;">
+            • Chunking: ${stats.engine.chunk_chars}-character windows with ${stats.engine.chunk_overlap} overlap, capped per document<br>
+            • Retrieval: sqlite-vec cosine + FTS5 BM25, ${stats.engine.recall_k} candidates per lane, fused with reciprocal rank<br>
+            • Optional multipliers on top of RRF: recency (above) and OpenAlex citation count${stats.engine.citation_weight ? ' (currently ' + stats.engine.citation_weight + ')' : ' (off)'}<br>
+            • Gate: after fusion the agent checks key terms are covered and acquires more literature if not<br>
+            • Query embedding instruction: ${stats.engine.query_instruction ? 'on' : 'off'}<br>
+            • No cross-encoder or learned re-ranker is wired into this engine.
+          </div>
+        </div>
+      `;
+    }
+  } catch (err) {
+    container.innerHTML = `<div style="color:var(--danger)">Failed to load data: ${esc(err)}</div>`;
+  }
+}
+
+function embedderSummaryHtml(e) {
+  if (!e) return '';
+  const name = (m) => (!m || m === 'unknown') ? 'unnamed' : m;
+  if (e.dim_mismatch || e.model_mismatch) {
+    return `
+      <div style="background:#2b1d0c; border:1px solid #78350f; border-radius:8px; padding:12px 14px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
+        <div>
+          <b style="color:#fde68a;">⚠️ Embedder does not match the index</b>
+          <div style="font-size:12px; color:#fef08a;">
+            indexed: ${esc(name(e.indexed_model))}${e.indexed_dim ? ` (${e.indexed_dim}d)` : ''} ·
+            active: ${esc(name(e.active_model))}${e.active_dim ? ` (${e.active_dim}d)` : ''}
+            ${e.dim_mismatch ? ' — different widths, so the vector table must be rebuilt' : ''}
+          </div>
+        </div>
+        <button class="btn-primary" style="background:#d97706; flex-shrink:0;" onclick="triggerReindex()">Re-index corpus</button>
+      </div>`;
+  }
+  return `
+    <div style="background:#13261e; border:1px solid #166534; border-radius:8px; padding:10px 14px; font-size:12.5px; color:#bbf7d0; display:flex; justify-content:space-between; align-items:center; gap:12px;">
+      <span>✅ Index vectors match the active embedder${e.indexed_dim ? ` (${e.indexed_dim}d)` : ''}.</span>
+      <button class="btn-secondary" style="padding:3px 8px; font-size:11px; flex-shrink:0;" onclick="triggerReindex()">Re-index</button>
+    </div>`;
+}
+
+async function saveSettings() {
+  const body = {
+    chat_model: $('setting-chat-model')?.value ?? currentSettings.chat_model,
+    embed_model: $('setting-embed-model')?.value ?? currentSettings.embed_model,
+    topk: parseInt($('setting-topk')?.value ?? currentSettings.topk, 10),
+    temperature: parseFloat($('setting-temp')?.value ?? currentSettings.temperature),
+    recency: parseFloat($('setting-recency')?.value ?? currentSettings.recency),
+    acquire: $('setting-acquire')?.checked ?? currentSettings.acquire
+  };
+  autoAcquireEnabled = body.acquire;
+  $('auto-acquire-toggle').classList.toggle('active', body.acquire);
+  try {
+    const res = await api('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (res.error) throw new Error(res.error);
+    currentSettings = res.settings;
+    refreshModelBadges();
+    if (res.needs_reindex) openSettingsModal('stats');
+  } catch (err) {
+    alert('Could not save settings: ' + err);
+  }
+}
+
+function refreshModelBadges() {
+  const s = globalStats && globalStats.settings;
+  if (s) currentSettings = { ...currentSettings, ...s };
+  const e = globalStats && globalStats.embedder;
+  $('active-model-label').textContent =
+    (globalStats && globalStats.models && globalStats.models.active_chat) || currentSettings.chat_model || 'chat server';
+  const dim = e && (e.active_dim || e.indexed_dim);
+  $('active-embed-badge').textContent =
+    `${currentSettings.embed_model || (e && e.active_model) || 'server default'}${dim ? ' · ' + dim + 'd' : ''}`;
+  $('sidebar-chunks').textContent = ((globalStats && globalStats.total_chunks) || 0).toLocaleString();
+}
+
+async function createNewPartitionFromModal() {
+  const input = $('new-partition-input');
+  const val = input.value.trim();
+  if (!val) return;
+  await api('/api/searches', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug: val, title: val })
+  });
+  input.value = '';
+  renderModalTabContent('stats');
+  loadCorpora();
+}
+
+async function deleteCorpus(slug) {
+  if (slug === 'all' || !confirm(`Forget [${slug}] from the index? Its PDFs stay on disk under search/${slug}/ and existing chats keep their answers.`)) return;
+  // A folder's vectors are deleted one row at a time and a big partition has
+  // tens of thousands of them: this request can take tens of seconds, so the
+  // panel says so and goes inert rather than looking like a dead button.
+  const panel = $('modal-content');
+  const busy = document.createElement('div');
+  busy.style.cssText = 'padding:10px; font-size:12.5px; color:var(--fg-muted);';
+  busy.textContent = `Forgetting ${slug} from the index — its files stay on disk…`;
+  panel.appendChild(busy);
+  panel.querySelectorAll('button').forEach(b => { b.disabled = true; });
+  let res;
+  try {
+    res = await api('/api/searches/' + encodeURIComponent(slug), { method: 'DELETE' });
+  } catch (err) {
+    busy.textContent = 'The request did not complete: ' + err;
+    panel.querySelectorAll('button').forEach(b => { b.disabled = false; });
+    return;
+  }
+  if (res.error) { busy.remove(); alert(res.error); return; }
+  if (activeSlug === slug) activeSlug = 'all';
+  busy.remove();
+  renderModalTabContent('stats');
+  loadCorpora();
+}
+
+// Catalogue Paper Search
+function openCatalogueSearch() {
+  openSettingsModal('catalogue');
+}
+
+async function executeCatalogueSearch() {
+  const q = $('cat-search-input').value.trim();
+  if (!q) return;
+  const container = $('cat-results-container');
+  container.innerHTML = '<div style="text-align:center; padding:20px;"><span class="spin"></span> Searching the catalogue…</div>';
+
+  try {
+    const res = await api('/api/libgen/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: q, limit: 8 })
+    });
+    const results = res.results || (Array.isArray(res) ? res : []);
+    if (!results.length) {
+      container.innerHTML = `<div style="font-size:12.5px; color:var(--fg-subtle); padding:20px; text-align:center;">${esc(res.summary ? String(res.summary).slice(0, 200) : 'Nothing matched. Catalogue search matches titles, so try different topic words.')}</div>`;
+      return;
+    }
+
+    container.innerHTML = `
+      <div style="font-size:11.5px; color:var(--fg-subtle); margin-bottom:4px;">
+        ${results.length} match(es)${res.summary ? ' · ' + esc(String(res.summary).slice(0, 120)) : ''}
+      </div>
+      ${results.map((p, i) => `
+        <div style="background:#131b29; border:1px solid var(--card-border); border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:6px;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+            <b style="font-size:13.5px; color:#fff;">${esc(p.title)}</b>
+            <button class="btn-primary" style="padding:4px 10px; font-size:11.5px; flex-shrink:0;" ${p.md5 ? '' : 'disabled title="no md5 in this record"'} onclick="importPaperToCorpus(${i})">
+              ＋ Fetch & index
+            </button>
+          </div>
+          <div style="font-size:12px; color:var(--fg-muted);">
+            <span>${esc(p.authors || 'unknown authors')}</span>${p.year ? ` · <span>${esc(p.year)}</span>` : ''}${p.ext ? ` · <span>${esc(p.ext)}</span>` : ''}${p.size ? ` · <span>${esc(p.size)}</span>` : ''}
+          </div>
+          ${p.md5 ? `<div style="font-size:11px; color:var(--fg-subtle);"><code>${esc(p.md5)}</code></div>` : ''}
+        </div>
+      `).join('')}
+    `;
+
+    window._catResults = results;
+  } catch (err) {
+    container.innerHTML = `<div style="color:var(--danger)">Error querying catalogue: ${esc(err)}</div>`;
+  }
+}
+
+async function importPaperToCorpus(idx) {
+  const paper = window._catResults[idx];
+  if (!paper) return;
+  if (!paper.md5) { alert('This record has no md5 to download.'); return; }
+  const targetSlug = activeSlug !== 'all' ? activeSlug : prompt('Which folder should receive it?', 'acquired');
+  if (!targetSlug) return;
+  const res = await api('/api/libgen/get', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug: targetSlug, md5: paper.md5 })
+  });
+  if (res.error) { alert(res.error); return; }
+  alert(`Download + index started into [${targetSlug}] — watch it under Settings → Index Health.`);
+  loadCorpora();
+}
+
+// Initial bootstrap
+async function init() {
+  await loadCorpora();
+  await loadSessions();
+  await checkAndDisplayMismatch();
+
+  if (currentSessionId) {
+    openSession(currentSessionId);
+  } else {
+    renderEmptyState();
+  }
+
+  try {
+    const s = await api('/api/settings');
+    currentSettings = s.settings;
+    globalStats = globalStats || {};
+    globalStats.settings = s.settings;
+    globalStats.embedder = s.embedder;
+    globalStats.models = { ...s.models, active_chat: (s.models.chat.find(m => m.active) || {}).id || '' };
+    autoAcquireEnabled = !!s.settings.acquire;
+    $('auto-acquire-toggle').classList.toggle('active', autoAcquireEnabled);
+    refreshModelBadges();
+  } catch (e) {}
+}
+
+init();
 </script>
 </body>
 </html>
