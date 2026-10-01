@@ -33,13 +33,17 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from searchbot import config, db, indexer, llm, retriever  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from searchbot import config, db, llm, retriever  # noqa: E402
+from bench_index import index_beir_corpus, verify_embedder  # noqa: E402
 
 ap = argparse.ArgumentParser(description=__doc__,
                              formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument("--data", default=str(config.DATA_DIR / "bench" / "nfcorpus"))
 ap.add_argument("--tag", default="gemma", help="name for this index (per embedder)")
 ap.add_argument("--reindex", action="store_true", help="rebuild even if the index exists")
+ap.add_argument("--force", action="store_true",
+                help="score an index the current embedder did not build")
 ap.add_argument("--systems", nargs="+", dest="lanes",
                 default=["hybrid", "bm25", "vec", "bm25okapi", "bm25beir",
                          "bm25title", "fts5porter", "tfidf", "random"],
@@ -66,41 +70,32 @@ if a.limit:
 
 c = db.connect()
 db.init(c, llm.embed_dim())
-have = c.execute("SELECT COUNT(*) n FROM docs WHERE slug=?", (SLUG,)).fetchone()["n"]
-if have and not a.reindex:
-    print(f"reusing index {config.DB_PATH.name} ({have} docs) — pass --reindex to rebuild")
-else:
-    c.execute("DELETE FROM docs WHERE slug=?", (SLUG,))
-    c.execute("DELETE FROM chunks WHERE slug=?", (SLUG,))
-    c.execute("DELETE FROM chunks_fts WHERE slug=?", (SLUG,))
-    c.execute("DELETE FROM chunks_vec WHERE slug=?", (SLUG,))
+if a.reindex:
+    for t in ("docs", "chunks", "chunks_fts", "chunks_vec"):
+        c.execute(f"DELETE FROM {t} WHERE slug=?", (SLUG,))
     c.commit()
-    id_map = {}                      # nfcorpus id -> rowid space of this db
-    t0 = time.time()
-    for d in corpus:
-        text = ((d["title"] + ". ") if d.get("title") else "") + d["text"]
-        chunks = indexer.chunk_text(text)
-        if not chunks:
-            continue
-        c.execute("INSERT INTO docs(slug,kind,source_file,title,n_chunks) VALUES(?,?,?,?,?)",
-                  (SLUG, "beir", d["_id"], d.get("title", ""), len(chunks)))
-        doc_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
-        id_map[d["_id"]] = doc_id
-        for ordinal, ch in enumerate(chunks):
-            c.execute("INSERT INTO chunks(slug,doc_id,ordinal,text) VALUES(?,?,?,?)",
-                      (SLUG, doc_id, ordinal, ch))
-            cid = c.execute("SELECT last_insert_rowid()").fetchone()[0]
-            c.execute("INSERT INTO chunks_fts(rowid,text,slug,doc_id,chunk_id) VALUES(?,?,?,?,?)",
-                      (cid, ch, SLUG, doc_id, cid))
-        vecs = llm.embed(chunks)
-        first = c.execute("SELECT id FROM chunks WHERE doc_id=? ORDER BY ordinal",
-                          (doc_id,)).fetchall()
-        c.executemany("INSERT INTO chunks_vec(chunk_id,slug,embedding) VALUES(?,?,?)",
-                      [(r["id"], SLUG, db.ser(v)) for r, v in zip(first, vecs)])
-        if len(id_map) % 500 == 0:
-            print(f"   {len(id_map)}/{len(corpus)} docs, {time.time()-t0:.0f}s")
-    c.commit()
-    print(f"indexed {len(id_map)} docs -> {config.DB_PATH.name} in {time.time()-t0:.0f}s")
+# Unconditional: index_beir_corpus skips whatever is already stored and commits
+# as it goes, so a build interrupted by a server error finishes on the next run
+# instead of being silently reused as though it were complete.
+before = c.execute("SELECT COUNT(*) n FROM docs WHERE slug=?", (SLUG,)).fetchone()["n"]
+index_beir_corpus(c, corpus, SLUG, log=(lambda *a: None) if before else print)
+
+# Refuse to measure an index the configured embedder did not build. The dense
+# lane returns a confident, well-formed, meaningless ranking in that case, and
+# two indexes in this project's history had numbers written down against the
+# wrong one before probe_embedder caught it.
+if {"vec", "hybrid"} & set(a.lanes):
+    cos = verify_embedder(c, SLUG)
+    if cos < 0.99:
+        print(f"\nSTOP: the configured embedder ({config.EMBED_URL}, "
+              f"{config.EMBED_MODEL or 'server default'}) reproduces this index's "
+              f"stored vectors at cosine {cos:.4f}. It was built by a different "
+              f"model, so the dense lane is noise. Point SEARCHBOT_EMBED_* at the "
+              f"model that built --tag {a.tag}, use another --tag, or pass --force "
+              f"to score it anyway (bm25-only runs are unaffected).")
+        if not a.force:
+            sys.exit(1)
+    print(f"index embedder verified: cosine {cos:.4f}")
 
 chunk2doc = {r["id"]: r["source_file"] for r in c.execute(
     "SELECT ch.id AS id, d.source_file AS source_file FROM chunks ch "
@@ -259,7 +254,12 @@ for name, ranker in systems.items():
 
 print(f"\nnfcorpus test | {len(qs)} questions | {len(corpus)} docs | "
       f"{c.execute('SELECT COUNT(*) FROM chunks WHERE slug=?', (SLUG,)).fetchone()[0]} chunks")
-print(f"embed={config.EMBED_URL} model={config.EMBED_MODEL or 'default'} tag={a.tag}\n")
+print(f"embed={config.EMBED_URL} model={config.EMBED_MODEL or 'default'} tag={a.tag}")
+# The query instruction is part of the query vector, so it belongs in the record
+# of a run: with embeddinggemma's default prefix on nomic the dense lane drops
+# from 0.3464 to 0.2528 and nothing else about the run changes.
+qi = config.QUERY_INSTRUCT.strip().replace("\n", " ") or "(none)"
+print(f"query_instruct={qi[:70]}")
 print(f"{'system':<12}{'nDCG@10':>9}{'MRR@10':>9}{'Recall@100':>12}{'HitRate@100':>13}{'s':>7}")
 for name, r in results.items():
     print(f"{name:<12}{r['nDCG@10']:>9}{r['MRR@10']:>9}{r['Recall@100']:>12}"
