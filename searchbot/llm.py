@@ -23,7 +23,8 @@ def embed(texts, is_query: bool = False, batch_size: int = 8):
     global _embed_dim
     out = []
     for i in range(0, len(texts), batch_size):
-        batch = [config.QUERY_INSTRUCT + t if is_query else t for t in texts[i:i + batch_size]]
+        raw = texts[i:i + batch_size]
+        batch = [config.QUERY_INSTRUCT + t if is_query else t for t in raw]
         payload = {"input": batch}
         if config.EMBED_MODEL:
             payload["model"] = config.EMBED_MODEL
@@ -31,9 +32,25 @@ def embed(texts, is_query: bool = False, batch_size: int = 8):
         r = requests.post(config.EMBED_URL + "/embeddings", json=payload,
                           headers=auth(), timeout=180)
         if r.status_code == 500 and len(batch) > 1:
-            # one oversized text poisons the batch — go one-by-one
-            for one in batch:
-                out.extend(embed([one], is_query=False, batch_size=1))
+            # one oversized text poisons the batch — go one-by-one. Retry the
+            # *original* texts, never the prefixed ones: handing back a batch
+            # element would either re-apply the instruction or drop it.
+            for one in raw:
+                out.extend(embed([one], is_query=is_query, batch_size=1))
+            continue
+        if r.status_code == 500 and len(batch) == 1 and "too large" in r.text.lower():
+            # llama.cpp rejects any single sequence longer than its physical
+            # batch (--batch-size, 512 by default) and other servers cap by
+            # tokens too, so an oversized chunk must not kill the index. Split
+            # it, mean-pool the parts and renormalize: the same pooling the
+            # server would have done, just with a smaller window.
+            parts = [raw[0][j:j + config.EMBED_MAX_CHARS]
+                     for j in range(0, len(raw[0]), config.EMBED_MAX_CHARS)]
+            if len(parts) < 2:
+                r.raise_for_status()
+            v = np.mean([embed([p], is_query=is_query, batch_size=1)[0] for p in parts],
+                        axis=0)
+            out.append(v / np.linalg.norm(v))
             continue
         r.raise_for_status()
         data = sorted(r.json()["data"], key=lambda d: d["index"])

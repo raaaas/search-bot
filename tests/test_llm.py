@@ -17,10 +17,11 @@ from searchbot import config, llm  # noqa: E402
 
 
 class FakeResponse:
-    def __init__(self, payload, stream_lines=None, status=200):
+    def __init__(self, payload, stream_lines=None, status=200, text=None):
         self._payload = payload
         self.status_code = status
         self._lines = stream_lines
+        self.text = text if text is not None else str(payload)
 
     def json(self):
         return self._payload
@@ -314,6 +315,34 @@ class EmbedRequestTest(LLMRequestCase):
         self.plug([FakeResponse({"data": [{"index": 0, "embedding": [0.0, 0.0]}]})])
         with self.assertRaises(RuntimeError):
             llm.embed(["x"])
+
+    def test_oversized_input_is_split_and_pooled_not_dropped(self):
+        """llama.cpp answers 500 — not truncation — when one input exceeds its
+        physical batch, so a long chunk must not be able to kill an index build."""
+        import numpy
+        support.config.EMBED_MAX_CHARS = 10
+        one = lambda v: FakeResponse({"data": [{"index": 0, "embedding": v}]})
+        too_long = FakeResponse({"error": {"message": "too large"}}, status=500,
+                                text="input (535 tokens) is too large to process")
+        fake = self.plug([too_long, one([1.0, 0.0]), one([0.0, 1.0]), one([1.0, 0.0])])
+        try:
+            v = llm.embed(["x" * 25])[0]
+        finally:
+            support.config.EMBED_MAX_CHARS = 800
+        self.assertEqual(len(fake.sent), 4)                   # 1 refused + 3 parts
+        self.assertAlmostEqual(float(numpy.linalg.norm(v)), 1.0, places=5)
+        self.assertEqual([round(x, 3) for x in v.tolist()], [0.894, 0.447])
+
+    def test_per_item_retry_keeps_the_query_instruction(self):
+        """A poisoned batch must fall back to the same query semantics, or the
+        fused lane compares instructed and uninstructed vectors against one index."""
+        support.config.QUERY_INSTRUCT = "Instruct: q\nQuery: "
+        one = {"data": [{"index": 0, "embedding": [1.0, 0.0]}]}
+        fake = self.plug([FakeResponse(one, status=500, text="batch poisoned"),
+                          FakeResponse(one), FakeResponse(one)])
+        llm.embed(["alpha", "beta"], is_query=True)
+        self.assertEqual([s["input"][0] for s in fake.sent[1:]],
+                         ["Instruct: q\nQuery: alpha", "Instruct: q\nQuery: beta"])
 
     def test_query_instruction_prefix(self):
         support.config.QUERY_INSTRUCT = "Instruct: q\nQuery: "
