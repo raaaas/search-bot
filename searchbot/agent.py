@@ -247,7 +247,7 @@ def _derive_folder(question):
 
 
 def ask_agentic(c, slug, session_id, question, topk=None, log=None, trace=None,
-                acquire=True, rank=None):
+                acquire=True, rank=None, temperature=None):
     from .trace import Ev
     rank = rank or {}
     ev = Ev(log=log, trace=trace)
@@ -309,7 +309,8 @@ def ask_agentic(c, slug, session_id, question, topk=None, log=None, trace=None,
         memory.add_turn(c, session_id, mem_slug, "assistant", msg)
         return {"answer": msg, "evidence": [], "rounds": rounds}
     # generate from current top hits without re-retrieving
-    return _answer_with(c, mem_slug, session_id, question, hits, topk, rounds, ev)
+    return _answer_with(c, mem_slug, session_id, question, hits, topk, rounds, ev,
+                        temperature=temperature)
 
 
 def _emit_hits(ev, phase, msg, hits, **extra):
@@ -324,7 +325,7 @@ def _folder_for(term, question):
     return re.sub(r"[^a-z0-9-]", "", term.lower())[:24] or _derive_folder(question)
 
 
-def _answer_with(c, slug, session_id, question, hits, topk, rounds, ev):
+def _answer_with(c, slug, session_id, question, hits, topk, rounds, ev, temperature=None):
     mem_block = memory.build_memory_block(c, session_id)
     turns = memory.recent_turns(c, session_id)
     messages = [{"role": "system", "content": pipeline.SYSTEM}]
@@ -344,7 +345,8 @@ def _answer_with(c, slug, session_id, question, hits, topk, rounds, ev):
     ev("generate", f"asking {llm.chat_model()} to compose the grounded answer…",
        model=llm.chat_model())
     t0 = time.time()
-    raw = llm.chat_llm(messages, temperature=0.2, max_tokens=800,
+    raw = llm.chat_llm(messages, temperature=(0.2 if temperature is None else temperature),
+                       max_tokens=800,
                       on_delta=lambda txt: ev.delta(txt),
                       on_retry=lambda budget: ev("reset",
                           f"first pass had no usable text (thinking ate the budget) — retrying at {budget} tokens…"))
@@ -361,7 +363,8 @@ def _answer_with(c, slug, session_id, question, hits, topk, rounds, ev):
         shown = ("The model returned no text for this query. Try again or "
                  "rephrase the question.")
     refs = [{"tag": f"E{i}", "title": h["title"], "year": h["year"], "journal": h["journal"],
-             "pmcid": h["pmcid"], "doi": h["doi"], "file": h["source_file"], "slug": h["slug"]}
+             "pmcid": h["pmcid"], "doi": h["doi"], "file": h["source_file"], "slug": h["slug"],
+             "excerpt": (h["text"] or "")[:280]}
             for i, h in enumerate(hits, 1)]
     memory.add_turn(c, session_id, slug, "user", question)
     memory.add_turn(c, session_id, slug, "assistant", shown, refs)
