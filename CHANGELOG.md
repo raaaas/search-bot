@@ -4,9 +4,34 @@ Change history for search-bot, newest first. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project is not
 version-tagged, so entries are dated.
 
-## 2026-10-01 — public benchmark (nfcorpus), lexical lane made disjunctive
+## 2026-10-01 — public benchmarks (nfcorpus, SciFact), lexical lane made disjunctive
 
 ### Added
+- **SciFact end-to-end benchmark** (`scripts/fetch_scifact.py`,
+  `scripts/bench_endtoend.py`) — the question retrieval metrics cannot ask. 1,109
+  claims each carry a human verdict of SUPPORT / CONTRADICT / NOINFO, so the
+  system's *answer* has a gold label to be wrong against, and one class
+  (NOT_ENOUGH_EVIDENCE) can only be earned by abstaining. The harness runs the
+  2×2 the project is a claim about: a small model with this engine's top-k
+  evidence in its prompt, against models several times its size working from
+  memory. Scored on accuracy, macro-F1 and per-class recall, with the parse
+  failure and answered-claim counts printed beside every row so a refusal to
+  commit is never silently reported as a wrong verdict.
+- **`scripts/bench_index.py`** — one BEIR indexer shared by both public
+  benchmarks, so their numbers are comparable by construction rather than by
+  intent. It skips documents already stored and commits every 500, so an
+  interrupted build finishes on the next run instead of being silently reused as
+  a complete index when it is half one.
+- **Both benchmarks refuse to run against a mismatched index.** Each re-embeds a
+  stored chunk and compares cosines (`verify_embedder`), exiting below 0.99 unless
+  `--force` is passed. Scoring an index built by another embedder does not error:
+  it returns a confident, well-formed, meaningless ranking, and this project
+  published numbers from one twice before `probe_embedder.py` caught it by hand.
+- **`SEARCHBOT_QUERY_INSTRUCT` is recorded in every benchmark run's output**, and
+  the README's reproduce commands carry it. It is part of the query *vector*, so
+  it belongs to the result, not to the setup.
+- **Dataset downloads survive rate limiting** — backoff that honors `Retry-After`,
+  per-page flush, and resume by counting the rows already on disk.
 - **nfcorpus benchmark** (`scripts/fetch_nfcorpus.py`, `scripts/bench_nfcorpus.py`) — the
   engine measured against *public* questions and human judgments instead of anything
   derived from this corpus: 323 TREC 2017/2018 biomedical questions, 3,633 PubMed
@@ -29,6 +54,18 @@ version-tagged, so entries are dated.
   match, 1 on a same-dimension mismatch, 2 on a dimension change.
 
 ### Fixed
+- **An embed server that refuses oversized input killed index builds.** llama.cpp
+  answers HTTP 500, not a truncation, when one input exceeds its physical batch
+  (`--batch-size` defaults to 512 tokens), and number-heavy text crosses that well
+  inside the 1100-character chunk cap: a SciFact abstract at 535 tokens stopped a
+  5,183-document build at document 2,000. `embed()` now splits input over
+  `SEARCHBOT_EMBED_MAX_CHARS` and mean-pools the parts.
+- **The batch-fallback path dropped the retrieval instruction from retried
+  queries** (`is_query=False` was hardcoded), so a poisoned batch left those
+  queries embedded as *passages* while the rest of the lane was embedded as
+  instructed queries — the fused lane then compared two vector spaces against one
+  index, which is the same class of failure the FTS bug below was found by. It now
+  retries the original texts with the original flag; a test locks both halves.
 - **The lexical lane was conjunctive.** Every keyword was emitted as a mandatory quoted
   phrase and FTS5 separates terms by AND, so a document missing one term of the query was
   gone from the candidate set. The engine's BM25 lane scored **0.2109** nDCG@10 on

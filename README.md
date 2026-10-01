@@ -199,8 +199,18 @@ candidate set entirely. The engine's BM25 lane sat **31% below** textbook BM25
 (0.2109 vs 0.3069) and dragged hybrid down with it. Joining the terms with `OR`
 lifted the lane to 0.3154 and hybrid from 0.2867 to 0.3190 on the same index.
 
+The commands below reproduce the tables exactly. `SEARCHBOT_QUERY_INSTRUCT` is
+part of the command because it is part of the query *vector*: the engine's default
+prefix is the one embeddinggemma is trained on, and feeding it to nomic costs
+that model **27% of its dense-lane nDCG@10** (0.3464 → 0.2528, hybrid
+0.3516 → 0.3309) with the index, the code and the BM25 control row completely
+unchanged. Every row in this README was measured with the setting shown, and the
+harness prints the setting it used.
+
 ```bash
 .venv/bin/python scripts/bench_nfcorpus.py --tag nomic            # everything above
+SEARCHBOT_QUERY_INSTRUCT= \
+    .venv/bin/python scripts/bench_nfcorpus.py --tag nomic        # nomic/bge-m3 rows
 .venv/bin/python scripts/bench_nfcorpus.py --tag nomic \
     --systems hybrid bm25 vec bm25okapi tfidf random              # a subset
 ```
@@ -314,7 +324,9 @@ searchbot/            the engine (importable package)
 web/index.html        chat UI with evidence panel
 scripts/              index.py, ask.py, citations.py,
                       build_eval_set.py + bench_retrieval.py (known-item set),
-                      fetch_nfcorpus.py + bench_nfcorpus.py (public benchmark),
+                      fetch_nfcorpus.py + bench_nfcorpus.py (public retrieval benchmark),
+                      fetch_scifact.py + bench_endtoend.py (public answer benchmark),
+                      bench_index.py (indexer shared by both),
                       probe_embedder.py, start_servers.sh
 tests/                stdlib unittest suite — no model server, no corpus, no network
 tests/eval/           generated locally from your corpus (gitignored)
@@ -369,7 +381,8 @@ All via environment variables, no code edits needed:
 | `SEARCHBOT_CHAT_MODEL` | *(auto-detect)* | pin a model name instead of detecting from `/v1/models` |
 | `SEARCHBOT_EMBED_URL` | `http://127.0.0.1:8082/v1` | OpenAI-compatible embeddings endpoint |
 | `SEARCHBOT_EMBED_MODEL` | *(omitted from request)* | model name for multi-model embed servers |
-| `SEARCHBOT_QUERY_INSTRUCT` | embeddinggemma `Instruct: …\nQuery: ` | retrieval prefix added to queries only |
+| `SEARCHBOT_QUERY_INSTRUCT` | embeddinggemma `Instruct: …\nQuery: ` | retrieval prefix added to queries only — **embedder-specific**, see below |
+| `SEARCHBOT_EMBED_MAX_CHARS` | `800` | characters per embedding request; longer input is split and pooled, because some servers answer 500 instead of truncating |
 | `SEARCHBOT_API_KEY` | *(none)* | Bearer token for a keyed provider, sent to both endpoints; a local server ignores it |
 | `SEARCHBOT_RECENCY_WEIGHT` | `0.0` | default recency multiplier for every query |
 | `SEARCHBOT_RECENCY_HALF_LIFE` | `10` | years for a paper's recency score to halve |
@@ -433,6 +446,10 @@ model that built the index, 0.00 is not.
 
 If your embedder wants its own query prefix (bge, e5, gte), put it in
 `SEARCHBOT_QUERY_INSTRUCT`; it is applied to queries only, never to indexed passages.
+This is not cosmetic — the prefix is part of the query vector. Measured on nfcorpus,
+nomic-embed-text scored **0.3464** nDCG@10 with no prefix and **0.2528** with this
+project's default (which is embeddinggemma's), while the BM25 lane was identical in both
+runs. An embedder-specific prefix, or none, is a configuration step and not a tuning one.
 
 MCP clients register the server by launching `python -m searchbot.mcp_server` from
 the project root with a virtualenv that has the deps installed; it exposes
