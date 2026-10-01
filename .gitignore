@@ -51,3 +51,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# --- CLI-local settings, not part of the project ---
+.qoder/
