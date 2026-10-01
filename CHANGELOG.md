@@ -4,6 +4,98 @@ Change history for search-bot, newest first. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project is not
 version-tagged, so entries are dated.
 
+## 2026-10-01 — the redesigned UI wired to the engine it was drawn against
+
+A UI redesign landed that had been drawn against a backend that does not exist: its
+panels read fields the Python server never returned, and it carried its own
+TypeScript server reimplementing the engine. The design was kept and the
+reimplementation dropped, which left one question for every panel — what is it
+allowed to claim? Now: a number appears only if this database or these servers
+produce it, and the two controls the engine cannot back were deleted rather than
+stubbed.
+
+### Added
+- **`GET /api/stats`** — per-folder doc/chunk/byte counts, the vector width read out
+  of the `vec0` table's own declaration, memory counts, recent jobs, the retrieval
+  knobs in effect. The sidebar, the storage panel and the health panel are four views
+  of this one call, so they cannot disagree with each other.
+- **Embedder state as a comparison, not a label** (`embedder_state`) — the width and
+  name the index was built with, against the width and name the server is serving
+  now. The *name* counts as a mismatch only when both sides are known: a bare
+  llama.cpp embedding server reports none, and guessing one would announce swaps that
+  never happened. The *width* is compared against the vector table itself, not only
+  against the stamp, because the table is the thing that refuses the insert — and
+  databases indexed before stamping existed carry no stamp.
+- **`indexed_embedder` stamped at index time** (`indexer.stamp_embedder`), which is
+  what gives that comparison a left side.
+- **`GET|POST /api/settings`** over a new `settings` table. The server owns the
+  defaults and validates what it stores, so the panel cannot drift from the engine,
+  and a save answers `needs_reindex` when the embedder changed.
+- **`POST /api/reindex`** — re-embeds the text already stored in `chunks` and rebuilds
+  the vector table at the new width. Changing embedders is an embedding job, not a
+  parsing job: no PDF is reopened. It commits in batches, so a run interrupted half
+  way leaves a *partly* vectorised index — which is why the same page counts chunks
+  without vectors and raises the mismatch banner, and why re-running the job (it
+  starts from a fresh table) is always the right repair.
+- **`DELETE /api/searches/<slug>`** — drops a folder's docs, chunks, FTS rows,
+  vectors and acquired rows, and returns the counts it removed. The files under
+  `search/<slug>/` and the chats that cited them are kept on purpose: this forgets the
+  index, not the evidence.
+- **The evidence panel shows the passage it cited** (`refs[].excerpt`), and the answer
+  temperature became a setting the agent actually honours instead of decoration.
+
+### Fixed
+- **`/api/stats` cost 11.6s on a 20,700-chunk corpus** — a page-load stall for
+  something four panels render from. `chunks_missing_vectors` was a correlated
+  `NOT EXISTS`, and a `vec0` virtual table has no index to answer one with; asked as
+  a materialised `NOT IN` the same question costs 0.02s.
+- **Answer text could escape its own copy button.** The button carried the text in an
+  inline `onclick` template literal escaped with `esc()` — an HTML escape, and the
+  JavaScript of an event-handler attribute is read *after* entity decoding. An answer
+  quoting a corpus passage containing a backtick or `${` closed the literal and ran
+  the rest. Inline handlers now receive `jsAttr()` values: a JSON string literal, then
+  HTML-escaped. Checked in jsdom with payloads carrying backticks, quotes, newlines
+  and `${}` — the copied text is byte-exact, including the strings that previously
+  executed.
+- **Two embedder-detection tests failed only on this machine.** `config.EMBED_URL`
+  still pointed at 127.0.0.1:8082, so a developer's running embed server answered
+  `/v1/models` inside a suite that promises not to touch a model server, and the tests
+  saw a model name they were written to assert the absence of. `TempCase` now pins
+  both server URLs to a closed port and restores them: "no server" is a fact the test
+  establishes rather than an assumption about the machine.
+- **`_model_ids` returned nothing from llama.cpp**, which answers `{"models":[…]}`
+  where the OpenAI spec and vLLM answer `{"data":[…]}`. Both envelopes are read now,
+  and a stopped server costs one short timeout per 30s instead of a stall on every
+  stats call.
+- **The auto-detected embedder was listed with an unknown width** in the settings
+  panel, while the health panel one tab over reported the width it was serving. The
+  model that is actually serving is the one that gets the width.
+- **Forgetting a large folder looked like a dead button.** Its vectors go one row at
+  a time — measured at ~1.2ms per chunk, so 25s for a 20,000-chunk partition — and
+  nothing on screen moved while the request ran. The panel now says what is happening
+  and disables itself until the answer arrives, including when it does not.
+
+### Removed
+- **The cross-encoder toggle, and every token counter.** There is no re-ranking model
+  in this engine, and the OpenAI-compatible chat endpoint as driven here returns no
+  usage figures, so both would have been numbers invented to fill a layout. What
+  remains is the retrieval explainer stating what runs: cosine + BM25 lanes, fused
+  with reciprocal rank, optional recency and OpenAlex-citation multipliers, and no
+  cross-encoder or learned re-ranker.
+
+### Tested
+- **`tests/test_webui.py`** pins the shipped page itself, in CI, without a browser:
+  every interpolation inside an inline event handler must be a `jsAttr()` literal
+  (verified to flag the two pre-fix sites and pass the fixed markup), the
+  cross-encoder may appear only as a denial, no token figure may appear at all, and
+  the inline script must parse (`node --check`, skipped where node is absent).
+- 33 webserver tests (13 new) over stats, settings merge precedence, the reindex job,
+  and corpus deletion; 147 suite-wide. The page was additionally driven in jsdom
+  against a live server on a copy of the real corpus — 18 render assertions (every
+  panel populated from real numbers, no `undefined`/`NaN`/`[object Object]` on screen,
+  a failed ask reported rather than spun on) and 7 escaping ones, all byte-exact
+  round-trips through the copy button.
+
 ## 2026-10-01 — public benchmarks (nfcorpus, SciFact), lexical lane made disjunctive
 
 ### Added

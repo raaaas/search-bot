@@ -304,14 +304,34 @@ the model needed a retry.
 - The MCP `ask` tool returns the final result plus the full `agent_events` list.
 - `acquire:false` runs the same trace without any catalogue fetching.
 
+## Corpus and settings endpoints
+
+What the web UI shows about itself is read from the database and the running
+servers, never hardcoded:
+
+- `GET /api/stats` — folders with doc/chunk/byte counts, vector width, sessions,
+  turns, facts, recent jobs, the retrieval knobs in effect (`engine`), and the
+  embedder state: what width the vectors in `chunks_vec` have, what the active
+  embedder produces, and whether the two disagree.
+- `GET /api/settings` — stored settings, the model lists each server reports, and
+  `defaults`. The server is the authority on defaults, so the UI cannot drift from it.
+- `POST /api/settings` — validates and persists (`topk` 1..50, `temperature` 0..2),
+  applies to `config` live, and answers `needs_reindex` when the embedder changed.
+- `POST /api/reindex` — re-embeds the text already stored in `chunks`, in a
+  background job with progress in `jobs`. Changing embedders does not re-parse PDFs;
+  `slug` may be one folder or `null` for the whole corpus.
+- `DELETE /api/searches/<slug>` — drops that folder's `docs`, `chunks`, FTS rows,
+  vectors and `acquired` rows. The PDFs under `search/<slug>/` and the chat history
+  that cited them stay: this forgets the index, not the evidence.
+
 ## Layout
 
 ```
 searchbot/            the engine (importable package)
   config.py           ports, budgets, paths
-  db.py               schema: docs / chunks / fts5 / vec0 / sessions / turns / facts / jobs
+  db.py               schema: docs / chunks / fts5 / vec0 / sessions / turns / facts / jobs / settings
   llm.py              chat client + embedder client (batched, retrying)
-  indexer.py          PDF & XML extraction, chunking, embedding
+  indexer.py          PDF & XML extraction, chunking, embedding, re-embedding
   retriever.py        hybrid vec + BM25, RRF fusion, year/recency/citation ranking
   memory.py           summary compaction, facts ledger, memory block
   pipeline.py         the answer loop (evidence → grounded answer)
