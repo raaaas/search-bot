@@ -28,7 +28,12 @@ _VOCAB = ("ephedrine hypotension anesthesia spinal ephedra metformin glucose "
 
 
 def embed_fake(texts, is_query=False, batch_size=8):
-    """Deterministic bag-of-tokens vector; shared vocabulary makes similarity sane."""
+    """Deterministic bag-of-tokens vector; shared vocabulary makes similarity sane.
+
+    Records the width the way the real embed() does, so code that asks
+    llm.embed_dim() without embedding first gets this dimension rather than its
+    fallback guess.
+    """
     out = []
     for t in texts:
         v = np.zeros(DIM, dtype=np.float32)
@@ -40,6 +45,7 @@ def embed_fake(texts, is_query=False, batch_size=8):
             v[0] = 1.0
         v = v / np.linalg.norm(v)
         out.append(v)
+    llm._embed_dim = DIM
     return out
 
 
@@ -51,16 +57,25 @@ class TempCase(unittest.TestCase):
         self._saved = {k: getattr(config, k) for k in
                        ("DATA_DIR", "DB_PATH", "SEARCH_DIR", "RECENCY_WEIGHT",
                         "CITATION_WEIGHT", "RECENCY_HALF_LIFE_YEARS",
-                        "OPENALEX_BATCH", "API_KEY", "CHAT_MODEL")}
+                        "OPENALEX_BATCH", "API_KEY", "CHAT_MODEL", "EMBED_MODEL",
+                        "CHAT_URL", "EMBED_URL")}
         config.DATA_DIR = pathlib.Path(self._tmp)
         config.DB_PATH = config.DATA_DIR / "test.db"
         config.SEARCH_DIR = config.DATA_DIR / "search"
+        # Port 1 refuses instantly. Without this, a model server the developer
+        # happens to be running answers /v1/models and the embedder-detection
+        # tests see a name they were written to assert the absence of.
+        config.CHAT_URL = "http://127.0.0.1:1/v1"
+        config.EMBED_URL = "http://127.0.0.1:1/v1"
         config.RECENCY_WEIGHT = 0.0
         config.CITATION_WEIGHT = 0.0
         config.RECENCY_HALF_LIFE_YEARS = 10.0
         config.OPENALEX_BATCH = 40
         config.API_KEY = ""
         config.CHAT_MODEL = "test-model"
+        config.EMBED_MODEL = ""
+        llm._chat_model = None
+        llm._embed_model = None
         self._embed = llm.embed
         llm.embed = embed_fake
         llm._embed_dim = DIM
@@ -71,6 +86,8 @@ class TempCase(unittest.TestCase):
         self.c.close()
         llm.embed = self._embed
         llm._embed_dim = None
+        llm._chat_model = None
+        llm._embed_model = None
         for k, v in self._saved.items():
             setattr(config, k, v)
 
