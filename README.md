@@ -337,7 +337,8 @@ web_run.py            starts the web UI
 ```
 
 Not committed (see `.gitignore`): the PDF/XML corpus under `search/`, model weights
-in `models/`, the `bin/libgen-mcp` binary, and all runtime state under `data/`.
+in `models/`, the `bin/libgen-mcp` binary (install steps below), and all runtime
+state under `data/`.
 
 ## Getting started
 
@@ -362,6 +363,54 @@ scripts/start_servers.sh
 .venv/bin/python scripts/ask.py ephedra       # CLI chat
 .venv/bin/python searchbot_mcp.py             # MCP server
 ```
+
+### Installing the catalogue binary
+
+Steps 1–4 need nothing but Python: indexing a folder of PDFs and answering from
+that index is entirely local. The binary in this section is the other half —
+the catalogue. It is what `libgen_search` / `libgen_download` (MCP server and
+web UI) talk to, and it is not committed: `bin/` is gitignored, because it is a
+25 MB third-party executable rather than project source. Without it, acquisition
+calls fail where the subprocess is spawned, and answering degrades quietly:
+`pipeline.answer()` asks the catalogue for keyword widening when corpus recall
+is weak (fewer than 3 hits, or a top score under 0.025), and `suggest_terms()`
+is best-effort — it returns nothing rather than raising, so a missing binary
+costs you recall on thin topics and nothing else.
+
+`searchbot/libgen.py` drives a pinned
+[libgen-mcp](https://github.com/jmrplens/libgen-mcp) v2.0.1 release binary (MIT,
+single static Go executable) over JSON-RPC on stdio. Any v2.0.1 asset whose
+checksum matches will do; the schemas in `libgen.py` are that version's.
+
+```bash
+mkdir -p bin && cd bin
+# pick your platform's asset: linux-amd64 | linux-arm64 | darwin-amd64 |
+# darwin-arm64 | darwin-all | windows-amd64.exe | windows-arm64.exe
+BASE=https://github.com/jmrplens/libgen-mcp/releases/download/v2.0.1
+curl -LO $BASE/libgen-mcp-linux-amd64
+curl -LO $BASE/checksums.txt
+sha256sum -c --ignore-missing checksums.txt    # linux-amd64 is 30de8343be809867…
+                                               # (macOS: shasum -a 256 -c)
+mv libgen-mcp-linux-amd64 libgen-mcp && chmod +x libgen-mcp
+cd ..
+```
+
+Rename it to `libgen-mcp` (or point `SEARCHBOT_LIBGEN_BIN` at wherever it
+lives) — the engine starts it as `bin/libgen-mcp -download-dir
+data/libgen_downloads -allow-private-addresses false`, and passes
+`LIBGEN_MCP_ALLOWED_DOWNLOAD_DIRS`, defaulted to `data/` and `search/`, so the
+server confines every write to this project's own trees.
+
+Catalogue mirrors are ISP-filtered in many places, so the subprocess gets
+`SEARCHBOT_SOCKS` (`socks5h://127.0.0.1:1090`) as its proxy and nothing else in
+the project ever routes through it; `export SEARCHBOT_SOCKS=` to go direct.
+Check it works: `.venv/bin/python -c "from searchbot import libgen;
+print(len(libgen.get_client().tools))"` should print `4` — the tool count from
+`tools/list` — rather than raise.
+
+The catalogue indexes copyrighted papers and books. Fetching them is your call
+and your license; the corpus they land in is gitignored for a reason, so please
+do not redistribute it.
 
 ### Adding material
 

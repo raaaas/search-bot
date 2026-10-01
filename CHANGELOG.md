@@ -74,6 +74,27 @@ version-tagged, so entries are dated.
   with it. Terms are joined with `OR` now: BM25 lane 0.2109 → 0.3154, hybrid 0.2867 →
   0.3190 on the same index, and on the known-item set BM25 R@20 went 0.698 → 0.975 with
   misses 107 → 9.
+- `bench_endtoend.py` scores the way the `Added` section above already said it did. A row
+  with no answer was tallied as a prediction of the literal string `"MISSING"` and lumped
+  into `unparsed`; an `ERROR` from the chat endpoint was not counted anywhere; and `macroF1`
+  averaged a hardcoded 3 classes, scoring a class absent from a subset run as a zero. The
+  entry claimed answered-claim counts beside every row — the script had never printed one,
+  and now does, along with `n`, so rows from runs of different completeness stay comparable.
+- `.qoder/`, the CLI's per-machine settings, matched no `.gitignore` rule and so appeared as
+  untracked project content on every `git status`.
+
+### Documented
+- **`bin/libgen-mcp` install steps** (`README → Getting started → Installing the catalogue
+  binary`). The binary is gitignored, so a fresh clone inherited the acquisition tools, the
+  `SEARCHBOT_LIBGEN_BIN` default and the libgen-mcp quirks — but nothing saying where the
+  executable comes from. It now names the pinned upstream (jmrplens/libgen-mcp v2.0.1, MIT),
+  the per-platform release assets, a `sha256sum -c` check against the release's own
+  `checksums.txt`, the flags the engine starts it with, the write confinement via
+  `LIBGEN_MCP_ALLOWED_DOWNLOAD_DIRS`, and that `SEARCHBOT_SOCKS` applies to that subprocess
+  alone. It also states what you lose without it: acquisition calls fail, while answering
+  degrades quietly, because `suggest_terms()` keyword widening is best-effort and returns
+  nothing instead of raising. The smoke test in that section was run against the pinned
+  binary and returns 4 tools.
 
 ### Measured (nfcorpus test split, 323 questions, doc-level)
 
