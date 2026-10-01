@@ -19,6 +19,7 @@ Usage: .venv/bin/python scripts/fetch_nfcorpus.py
 import json
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -32,37 +33,56 @@ PAGE = 100
 
 
 def page(url):
-    for attempt in range(4):
+    """One rows-endpoint call, retried through rate limits and CDN hiccups.
+
+    The endpoint answers 429 well before 100 requests go by, so the wait is
+    exponential and honours Retry-After when the server sends one.
+    """
+    for attempt in range(8):
         try:
             with urllib.request.urlopen(url, timeout=60) as r:
                 return json.load(r)
-        except Exception as e:                      # transient CDN failures
-            if attempt == 3:
+        except urllib.error.HTTPError as e:
+            if e.code not in (429, 500, 502, 503, 504) or attempt == 7:
                 raise
-            time.sleep(1.5 * (attempt + 1))
-    return None
+            wait = e.headers.get("Retry-After")
+            wait = float(wait) if wait and wait.isdigit() else min(90, 3 * 2 ** attempt)
+        except Exception:                           # transient CDN failures
+            if attempt == 7:
+                raise
+            wait = min(90, 3 * 2 ** attempt)
+        print(f"   retry in {wait:.0f}s", end="\r", flush=True)
+        time.sleep(wait)
 
 
 def fetch(name, dataset, config_name, split):
-    rows, offset = [], 0
-    while True:
+    """Page a split into data/bench/<dataset>/<name>.jsonl, resuming if told to.
+
+    Rows are appended and flushed per page: a 429 on request 90 of 115 should
+    cost a re-run 25 requests, not all 115.
+    """
+    OUT.mkdir(parents=True, exist_ok=True)
+    path = OUT / f"{name}.jsonl"
+    done = sum(1 for _ in open(path)) if path.exists() else 0
+    fh = open(path, "a")
+    offset, total = done, None
+    while total is None or offset < total:
         url = (BASE + "?dataset=" + urllib.parse.quote(dataset, safe="")
                + f"&config={config_name}&split={split}&offset={offset}&length={PAGE}")
         blob = page(url)
         batch = blob["rows"]
-        rows.extend(r["row"] for r in batch)
-        got = len(batch)
-        offset += got
         total = blob["num_rows_total"]
-        print(f"   {name}: {offset}/{total}", end="\r", flush=True)
-        if got == 0 or offset >= total:
+        if not batch:
             break
-    OUT.mkdir(parents=True, exist_ok=True)
-    with open(OUT / f"{name}.jsonl", "w") as fh:
-        for r in rows:
-            fh.write(json.dumps(r, ensure_ascii=False) + "\n")
-    print(f"\n{name}: wrote {len(rows)} rows -> {OUT / (name + '.jsonl')}")
-    return rows
+        for r in batch:
+            fh.write(json.dumps(r["row"], ensure_ascii=False) + "\n")
+        fh.flush()
+        offset += len(batch)
+        print(f"   {name}: {offset}/{total}", end="\r", flush=True)
+        time.sleep(0.25)            # the endpoint rate-limits a tight loop
+    fh.close()
+    print(f"\n{name}: {offset} rows -> {path}")
+    return [json.loads(l) for l in open(path)]
 
 
 if __name__ == "__main__":
