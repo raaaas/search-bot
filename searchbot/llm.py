@@ -91,6 +91,38 @@ def chat_model():
     return _chat_model
 
 
+_embed_model = None
+
+
+def embed_model():
+    """Resolve the embedder id: config override or auto-detect from /models.
+
+    'unknown' rather than a guess: a bare llama.cpp embedding server does not
+    always list its model, and the UI compares this against what the index was
+    built with, so a wrong name is worse than no name.
+    """
+    global _embed_model
+    if config.EMBED_MODEL:
+        return config.EMBED_MODEL
+    if _embed_model is None:
+        try:
+            data = requests.get(config.EMBED_URL + "/models",
+                                headers=auth(), timeout=10).json()["data"]
+            _embed_model = data[0]["id"]
+        except Exception:
+            _embed_model = "unknown"
+    return _embed_model
+
+
+def forget_models() -> None:
+    """Drop the cached model name/dimension after a settings change, so the next
+    call re-reads the server instead of reporting the previous embedder."""
+    global _embed_dim, _chat_model, _embed_model
+    _embed_dim = None
+    _chat_model = None
+    _embed_model = None
+
+
 import re
 
 _CONTROL_BLOCK = re.compile(

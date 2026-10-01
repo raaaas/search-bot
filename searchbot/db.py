@@ -5,6 +5,8 @@
 # are welcome to redistribute it under GNU GPL-3.0-only terms. See LICENSE.
 
 """SQLite schema: corpus (docs+chunks+fts5+vec0) and memory (sessions/turns/facts)."""
+import json
+import re
 import sqlite3
 import struct
 from . import config
@@ -41,6 +43,8 @@ CREATE TABLE IF NOT EXISTS acquired(
 CREATE TABLE IF NOT EXISTS jobs(
   id INTEGER PRIMARY KEY, slug TEXT, kind TEXT, state TEXT, info TEXT,
   updated_at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS settings(
+  key TEXT PRIMARY KEY, value TEXT, updated_at TEXT DEFAULT (datetime('now')));
 """
 
 _vec_schema = """
@@ -91,6 +95,26 @@ def init(c: sqlite3.Connection, dim: int) -> None:
     c.commit()
 
 
+def reset_vec_table(c: sqlite3.Connection, dim: int) -> None:
+    """Recreate the vector table for a different embedding width.
+
+    Only vectors are thrown away: chunk text and the FTS index are untouched, so
+    the corpus is recovered by re-embedding rather than by re-reading the PDFs.
+    """
+    c.execute("DROP TABLE IF EXISTS chunks_vec")
+    c.executescript(_vec_schema.format(dim=dim))
+    c.commit()
+
+
+def vec_dim(c) -> int:
+    """The vector width this database was created with, or 0 if it has none."""
+    row = c.execute("SELECT sql FROM sqlite_master WHERE name='chunks_vec'").fetchone()
+    if not row or not row["sql"]:
+        return 0
+    m = re.search(r"embedding\s+float\[(\d+)\]", str(row["sql"]))
+    return int(m.group(1)) if m else 0
+
+
 def ser(v) -> bytes:
     return struct.pack(f"{len(v)}f", *v)
 
@@ -112,3 +136,50 @@ def job_update(c, job_id, state, info=""):
     c.execute("UPDATE jobs SET state=?, info=?, updated_at=datetime('now') WHERE id=?",
               (state, info, job_id))
     c.commit()
+
+
+def set_setting(c, key, value) -> None:
+    c.execute("INSERT INTO settings(key,value,updated_at) VALUES(?,?,datetime('now')) "
+              "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+              (key, json.dumps(value)))
+    c.commit()
+
+
+def get_setting(c, key, default=None):
+    row = c.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    if not row:
+        return default
+    try:
+        return json.loads(row["value"])
+    except Exception:
+        return default
+
+
+def all_settings(c) -> dict:
+    out = {}
+    for row in c.execute("SELECT key,value FROM settings"):
+        try:
+            out[row["key"]] = json.loads(row["value"])
+        except Exception:
+            continue
+    return out
+
+
+def drop_corpus(c, slug: str) -> dict:
+    """Forget a corpus partition: its docs, chunks, index rows and search entry.
+
+    Leaves the files under search/{slug}/ and the chat memory that referenced
+    them alone — deleting a partition from the UI must not silently destroy the
+    PDFs it was built from or the answers already grounded in it.
+    """
+    ids = [r["id"] for r in c.execute("SELECT id FROM chunks WHERE slug=?", (slug,))]
+    for cid in ids:
+        c.execute("DELETE FROM chunks_fts WHERE rowid=?", (cid,))
+        c.execute("DELETE FROM chunks_vec WHERE chunk_id=?", (cid,))
+    n_docs = c.execute("SELECT COUNT(*) n FROM docs WHERE slug=?", (slug,)).fetchone()["n"]
+    c.execute("DELETE FROM chunks WHERE slug=?", (slug,))
+    c.execute("DELETE FROM docs WHERE slug=?", (slug,))
+    c.execute("DELETE FROM acquired WHERE slug=?", (slug,))
+    c.execute("DELETE FROM searches WHERE slug=?", (slug,))
+    c.commit()
+    return {"slug": slug, "docs": n_docs, "chunks": len(ids)}

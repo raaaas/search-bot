@@ -88,6 +88,44 @@ def chunk_text(text: str):
     return chunks[:config.MAX_CHUNKS_PER_DOC]
 
 
+def stamp_embedder(c, dim: int) -> None:
+    """Record which embedder the stored vectors came from, so a later model swap
+    can be reported as a mismatch instead of quietly corrupting retrieval."""
+    db.set_setting(c, "indexed_embedder", {"model": llm.embed_model(), "dim": int(dim)})
+
+
+def reembed(c, slug: str = None, job_id=None, batch_size: int = 8, log=print) -> dict:
+    """Re-embed every stored chunk with the ACTIVE embedder.
+
+    index_search will not revisit a document it has already seen, so switching
+    embedders needs this path instead: the chunk text is the source of truth and
+    only the vectors are rebuilt.
+    """
+    dim = llm.embed_dim()
+    if slug:
+        rows = c.execute("SELECT id, slug, text FROM chunks WHERE slug=? ORDER BY id",
+                         (slug,)).fetchall()
+    else:
+        rows = c.execute("SELECT id, slug, text FROM chunks ORDER BY id").fetchall()
+    db.reset_vec_table(c, dim)
+    stats = {"chunks": 0, "docs": 0, "dim": dim, "model": llm.embed_model()}
+    for i in range(0, len(rows), batch_size):
+        part = rows[i:i + batch_size]
+        vecs = llm.embed([r["text"] for r in part])
+        c.executemany("INSERT INTO chunks_vec(chunk_id,slug,embedding) VALUES(?,?,?)",
+                      [(r["id"], r["slug"], db.ser(v)) for r, v in zip(part, vecs)])
+        stats["chunks"] += len(part)
+        c.commit()
+        if job_id:
+            db.job_update(c, job_id, "running", f"re-embedded {stats['chunks']}/{len(rows)}")
+        log(f"re-embedded {stats['chunks']}/{len(rows)} chunks")
+    stamp_embedder(c, dim)
+    stats["docs"] = c.execute(
+        "SELECT COUNT(DISTINCT doc_id) n FROM chunks" + (" WHERE slug=?" if slug else ""),
+        ((slug,) if slug else ())).fetchone()["n"]
+    return stats
+
+
 def index_search(c, slug: str, job_id=None, log=print) -> dict:
     """(Re)index search/{slug}. Skips chunks already stored (content-hash per doc file)."""
     slug_dir = config.SEARCH_DIR / slug
@@ -137,6 +175,7 @@ def index_search(c, slug: str, job_id=None, log=print) -> dict:
         c.executemany("INSERT INTO chunks_vec(chunk_id,slug,embedding) VALUES(?,?,?)",
                       [(cid, slug, db.ser(v)) for cid, v in zip(chunk_ids, vecs)])
         stats["chunks"] += len(chunks)
+        stamp_embedder(c, len(vecs[0]) if vecs else dim)
         c.commit()
         if job_id:
             db.job_update(c, job_id, "running", f"{rel} ({len(chunks)} chunks)")
